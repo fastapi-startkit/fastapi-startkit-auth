@@ -2,8 +2,8 @@ import time
 
 import pytest
 
-from fastapi_passport.exceptions import InvalidToken
-from fastapi_passport.security.jwt import JWTEncoder
+from fastapi_startkit_auth.exceptions import InvalidToken
+from fastapi_startkit_auth.security.jwt import JWTEncoder
 
 
 SECRET = "test-secret-that-is-at-least-32-bytes-long!"

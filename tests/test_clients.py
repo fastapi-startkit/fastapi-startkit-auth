@@ -1,7 +1,7 @@
 import pytest
 
-from fastapi_passport.security.hashing import BcryptHasher
-from fastapi_passport.clients.repository import InMemoryClientRepository
+from fastapi_startkit_auth.security.hashing import BcryptHasher
+from fastapi_startkit_auth.clients.repository import InMemoryClientRepository
 
 
 @pytest.fixture

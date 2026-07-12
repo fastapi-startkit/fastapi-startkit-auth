@@ -4,9 +4,9 @@ indistinguishable at the HTTP boundary (no 429 leak), while the server still
 throttles (the notifier is not invoked beyond the throttle allowance)."""
 from fastapi.testclient import TestClient
 
-from fastapi_passport import Application, AuthProvider, AuthConfig
-from fastapi_passport.security.hashing import BcryptHasher
-from fastapi_passport.providers.memory import InMemoryUserProvider
+from fastapi_startkit_auth import Application, AuthProvider, AuthConfig
+from fastapi_startkit_auth.security.hashing import BcryptHasher
+from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 
 
 def build():

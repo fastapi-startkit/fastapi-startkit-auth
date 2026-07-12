@@ -1,10 +1,10 @@
 import pytest
 
-from fastapi_passport.config import AuthConfig
-from fastapi_passport.manager import AuthManager
-from fastapi_passport.security.hashing import BcryptHasher
-from fastapi_passport.providers.memory import InMemoryUserProvider
-from fastapi_passport.exceptions import InvalidToken
+from fastapi_startkit_auth.config import AuthConfig
+from fastapi_startkit_auth.manager import AuthManager
+from fastapi_startkit_auth.security.hashing import BcryptHasher
+from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
+from fastapi_startkit_auth.exceptions import InvalidToken
 
 
 @pytest.fixture

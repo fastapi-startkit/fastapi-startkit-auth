@@ -1,6 +1,6 @@
 import time
 
-from fastapi_passport.tokens.repository import InMemoryTokenRepository
+from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
 
 
 def test_access_token_record_roundtrip():

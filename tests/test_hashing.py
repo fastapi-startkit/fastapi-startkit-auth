@@ -1,4 +1,4 @@
-from fastapi_passport.security.hashing import BcryptHasher
+from fastapi_startkit_auth.security.hashing import BcryptHasher
 
 
 def test_hash_is_not_plaintext():

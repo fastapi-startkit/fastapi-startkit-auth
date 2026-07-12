@@ -22,7 +22,7 @@ class Application:
         providers: Iterable[tuple[type, Any]] | None = None,
         api: FastAPI | None = None,
     ) -> None:
-        self.api = api or FastAPI(title="FastAPI Passport")
+        self.api = api or FastAPI(title="FastAPI Startkit Auth")
         self.providers: list[Any] = []
         for provider_cls, config in providers or []:
             provider = provider_cls(config)

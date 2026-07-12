@@ -1,8 +1,8 @@
-# fastapi-passport
+# fastapi-startkit-auth
 
 Passport-style OAuth2 + JWT authentication for FastAPI.
 
-`fastapi-passport` brings the ergonomics of [Laravel Passport](https://laravel.com/docs/13.x/passport)
+`fastapi-startkit-auth` brings the ergonomics of [Laravel Passport](https://laravel.com/docs/13.x/passport)
 to FastAPI: a config-driven guard/provider/passwords model layered on top of
 OAuth2 grants and signed JWT access tokens (per the
 [FastAPI security tutorial](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/)).
@@ -26,9 +26,9 @@ OAuth2 grants and signed JWT access tokens (per the
 ## Installation
 
 ```bash
-pip install fastapi-passport
+pip install fastapi-startkit-auth
 # optional ORM provider driver
-pip install "fastapi-passport[masoniteorm]"
+pip install "fastapi-startkit-auth[masoniteorm]"
 ```
 
 > Uses `bcrypt` directly (not `passlib`, which imports the `crypt` stdlib module
@@ -38,7 +38,7 @@ pip install "fastapi-passport[masoniteorm]"
 
 ```python
 from fastapi import Depends
-from fastapi_passport import Application, AuthProvider, AuthConfig, current_user, require_scopes
+from fastapi_startkit_auth import Application, AuthProvider, AuthConfig, current_user, require_scopes
 from myapp.models import User  # any active-record-style model
 
 
