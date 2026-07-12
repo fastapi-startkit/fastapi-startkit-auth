@@ -206,10 +206,15 @@ def test_password_reset_flow(client):
     assert client.post("/token", data={"username": "grace@example.com", "password": "hopper"}).status_code == 400
 
 
-def test_password_reset_throttle(client):
-    client.post("/password/email", json={"email": "grace@example.com"})
+def test_password_reset_throttle_does_not_leak_status(client):
+    # Throttling is enforced server-side but must not surface a distinct status
+    # (a 429 would let an attacker enumerate registered emails). Both requests
+    # return the same generic 200; the throttled one issues no new token.
+    first = client.post("/password/email", json={"email": "grace@example.com"})
     second = client.post("/password/email", json={"email": "grace@example.com"})
-    assert second.status_code == 429
+    assert first.status_code == second.status_code == 200
+    assert first.json()["status"] == second.json()["status"]
+    assert "token" not in second.json()  # throttled: no new token generated
 
 
 def test_unsupported_grant_type(client):
