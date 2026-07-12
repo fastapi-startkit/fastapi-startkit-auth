@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 from ..security.hashing import BcryptHasher, Hasher
@@ -32,6 +33,11 @@ class ModelUserProvider:
         self._id_field = id_field
         self._username_field = username_field
         self._password_field = password_field
+        self._dummy_hash = self._hasher.make(secrets.token_urlsafe(16))
+
+    def dummy_verify(self) -> None:
+        """Run a throwaway hash verification to equalise timing for absent users."""
+        self._hasher.verify("invalid", self._dummy_hash)
 
     def retrieve_by_id(self, identifier: Any) -> Any | None:
         return self._model.find(identifier)

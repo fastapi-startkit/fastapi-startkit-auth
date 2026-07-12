@@ -145,20 +145,27 @@ def test_authorization_endpoint_requires_authenticated_user(client):
 
 
 # --- introspection + revocation -----------------------------------------
+def register_client(client):
+    reg = client.post("/oauth/clients", json={"name": "resource-server", "confidential": True}).json()
+    return {"client_id": reg["id"], "client_secret": reg["secret"]}
+
+
 def test_introspection(client):
+    creds = register_client(client)
     token = get_token(client, scope="read")["access_token"]
-    resp = client.post("/oauth/introspect", data={"token": token})
+    resp = client.post("/oauth/introspect", data={"token": token, **creds})
     assert resp.status_code == 200
     assert resp.json()["active"] is True
 
 
 def test_revocation_makes_token_inactive(client):
+    creds = register_client(client)
     body = get_token(client, scope="read")
     token = body["access_token"]
-    assert client.post("/oauth/revoke", data={"token": token}).status_code == 200
+    assert client.post("/oauth/revoke", data={"token": token, **creds}).status_code == 200
     # protected route now rejects it
     assert client.get("/user", headers={"Authorization": f"Bearer {token}"}).status_code == 401
-    assert client.post("/oauth/introspect", data={"token": token}).json()["active"] is False
+    assert client.post("/oauth/introspect", data={"token": token, **creds}).json()["active"] is False
 
 
 # --- personal access tokens ---------------------------------------------

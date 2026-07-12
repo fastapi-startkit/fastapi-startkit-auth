@@ -36,6 +36,12 @@ class AuthConfig:
     authorization_code_ttl: int = 600       # 10 minutes
     bcrypt_rounds: int = 12
 
+    # Called as ``notifier(email, token)`` when a reset link is requested so the
+    # app can deliver the token (e.g. email it). The plaintext token is NEVER put
+    # in the HTTP response unless ``debug_expose_reset_token`` is explicitly True.
+    password_reset_notifier: Any = None
+    debug_expose_reset_token: bool = False
+
     @classmethod
     def get(cls, name: str, default: Any = None) -> Any:
         return getattr(cls, name, default)

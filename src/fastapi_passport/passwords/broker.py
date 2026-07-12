@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from typing import Callable
 
 from ..exceptions import InvalidGrant, ThrottleException
 from ..providers.base import UserProvider
@@ -24,12 +25,14 @@ class PasswordBroker:
         hasher: Hasher | None = None,
         expire_minutes: int = 60,
         throttle_seconds: int = 60,
+        notifier: Callable[[str, str], None] | None = None,
     ) -> None:
         self._users = user_provider
         self._repo = repository or InMemoryPasswordResetRepository()
         self._hasher = hasher or BcryptHasher()
         self._expire_minutes = expire_minutes
         self._throttle_seconds = throttle_seconds
+        self._notifier = notifier
 
     def _find_user(self, email: str):
         return self._users.retrieve_by_credentials({"email": email, "username": email})
@@ -37,11 +40,16 @@ class PasswordBroker:
     def send_reset_link(self, email: str) -> str:
         user = self._find_user(email)
         if user is None:
+            # Do equivalent hashing work before failing so response timing does
+            # not reveal whether the email is registered.
+            self._hasher.make(secrets.token_urlsafe(40))
             raise InvalidGrant("We can't find a user with that email address.")
         if self._repo.recently_created(email, self._throttle_seconds):
             raise ThrottleException("Please wait before requesting another reset link.")
         token = secrets.token_urlsafe(40)
         self._repo.create(email, self._hasher.make(token))
+        if self._notifier is not None:
+            self._notifier(email, token)
         return token
 
     def reset(self, email: str, token: str, new_password: str) -> bool:

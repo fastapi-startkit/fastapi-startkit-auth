@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Request, Response
 from pydantic import BaseModel
@@ -11,6 +12,7 @@ from .clients.models import Client
 from .dependencies import current_user, get_auth_manager
 from .exceptions import (
     InvalidClient,
+    InvalidGrant,
     InvalidRequest,
     UnauthorizedClient,
     UnsupportedGrantType,
@@ -78,6 +80,19 @@ def _authenticate_client(manager: AuthManager, client_id: str, secret: str | Non
     return client
 
 
+def _require_authenticated_client(
+    manager: AuthManager, request: Request, client_id: str | None, client_secret: str | None
+) -> Client:
+    """Authenticate the calling client for the introspection/revocation endpoints."""
+    client_id, client_secret = _client_credentials_from_request(request, client_id, client_secret)
+    if not client_id:
+        raise InvalidClient("Client authentication is required.")
+    client = manager.client_repository.authenticate(client_id, client_secret)
+    if client is None:
+        raise InvalidClient("Client authentication failed.")
+    return client
+
+
 def build_router(prefix: str = "") -> APIRouter:
     """Build the OAuth2/Passport router. Mounted onto the app by AuthProvider."""
     router = APIRouter(prefix=prefix)
@@ -132,10 +147,16 @@ def build_router(prefix: str = "") -> APIRouter:
             client = manager.client_repository.find(client_id)
             if client is None:
                 raise InvalidClient("Unknown client.")
+            client_authenticated = False
             if client.confidential:
                 _authenticate_client(manager, client_id, client_secret, "authorization_code")
+                client_authenticated = True
             issued = manager.authorization_code_grant().handle(
-                client=client, code=code, redirect_uri=redirect_uri, code_verifier=code_verifier
+                client=client,
+                code=code,
+                redirect_uri=redirect_uri,
+                code_verifier=code_verifier,
+                client_authenticated=client_authenticated,
             )
             return issued.to_response()
 
@@ -178,27 +199,35 @@ def build_router(prefix: str = "") -> APIRouter:
         result: dict[str, Any] = {"code": code, "state": body.state}
         if body.redirect_uri:
             sep = "&" if "?" in body.redirect_uri else "?"
-            query = f"code={code}"
-            if body.state:
-                query += f"&state={body.state}"
-            result["redirect_to"] = f"{body.redirect_uri}{sep}{query}"
+            params = {"code": code}
+            if body.state is not None:
+                params["state"] = body.state
+            result["redirect_to"] = f"{body.redirect_uri}{sep}{urlencode(params)}"
         return result
 
     # --- introspection (RFC 7662) -------------------------------------
     @router.post("/oauth/introspect")
     async def introspect(
+        request: Request,
         token: str = Form(...),
+        client_id: str | None = Form(None),
+        client_secret: str | None = Form(None),
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
+        _require_authenticated_client(manager, request, client_id, client_secret)
         return manager.token_service.introspect(token)
 
     # --- revocation (RFC 7009) ----------------------------------------
     @router.post("/oauth/revoke")
     async def revoke(
+        request: Request,
         token: str = Form(...),
         token_type_hint: str | None = Form(None),
+        client_id: str | None = Form(None),
+        client_secret: str | None = Form(None),
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
+        _require_authenticated_client(manager, request, client_id, client_secret)
         svc = manager.token_service
         # Try refresh first when hinted; otherwise decode as an access token.
         if token_type_hint == "refresh_token":
@@ -303,10 +332,18 @@ def build_router(prefix: str = "") -> APIRouter:
         body: ForgotPasswordRequest,
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
-        token = manager.broker().send_reset_link(body.email)
-        # The token is returned for API/testing convenience; a production app
-        # would email it instead of exposing it in the response.
-        return {"status": "reset link generated", "token": token}
+        # Always respond identically whether or not the email exists, so the
+        # endpoint can't be used to enumerate accounts. The token is delivered
+        # out-of-band via the configured notifier, never in the HTTP response
+        # (unless debug_expose_reset_token is explicitly enabled).
+        generic = {"status": "If that account exists, a reset link has been sent."}
+        try:
+            token = manager.broker().send_reset_link(body.email)
+        except InvalidGrant:
+            return generic
+        if manager.debug_expose_reset_token:
+            return {**generic, "token": token}
+        return generic
 
     @router.post("/password/reset")
     async def reset_password(

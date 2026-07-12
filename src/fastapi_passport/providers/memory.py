@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 from ..security.hashing import BcryptHasher, Hasher
@@ -25,6 +26,8 @@ class InMemoryUserProvider:
         self._username_field = username_field
         self._password_field = password_field
         self._users: dict[Any, dict[str, Any]] = {}
+        # Precomputed hash for constant-time verification of absent users.
+        self._dummy_hash = self._hasher.make(secrets.token_urlsafe(16))
 
     def add(self, user: dict[str, Any]) -> dict[str, Any]:
         self._users[user[self._id_field]] = user
@@ -53,6 +56,10 @@ class InMemoryUserProvider:
         if supplied is None:
             return False
         return self._hasher.verify(supplied, user.get(self._password_field, ""))
+
+    def dummy_verify(self) -> None:
+        """Run a throwaway hash verification to equalise timing for absent users."""
+        self._hasher.verify("invalid", self._dummy_hash)
 
     def get_identifier(self, user: dict[str, Any]) -> Any:
         return user[self._id_field]

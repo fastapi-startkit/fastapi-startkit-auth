@@ -15,7 +15,14 @@ class PasswordGrant:
     def handle(self, *, username: str, password: str, scopes: list[str], client_id: str | None) -> IssuedToken:
         credentials = {"username": username, "email": username, "password": password}
         user = self._users.retrieve_by_credentials(credentials)
-        if user is None or not self._users.validate_credentials(user, credentials):
+        if user is None:
+            # Perform equivalent hashing work so response timing doesn't reveal
+            # whether the account exists, then fail with the same generic error.
+            dummy = getattr(self._users, "dummy_verify", None)
+            if callable(dummy):
+                dummy()
+            raise InvalidGrant("The provided credentials are incorrect.")
+        if not self._users.validate_credentials(user, credentials):
             raise InvalidGrant("The provided credentials are incorrect.")
         return self._tokens.issue(
             user_id=self._users.get_identifier(user),

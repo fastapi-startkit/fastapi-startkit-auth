@@ -49,12 +49,22 @@ class TokenService:
         access_ttl: int = 3600,
         refresh_ttl: int = 1209600,
         personal_access_ttl: int = 31536000,
+        purge_interval: int = 300,
     ) -> None:
         self.encoder = encoder
         self.repository = repository or InMemoryTokenRepository()
         self.access_ttl = access_ttl
         self.refresh_ttl = refresh_ttl
         self.personal_access_ttl = personal_access_ttl
+        self._purge_interval = purge_interval
+        self._last_purge = time.time()
+
+    def _maybe_purge(self) -> None:
+        """Drop expired records periodically so in-memory stores stay bounded."""
+        now = time.time()
+        if now - self._last_purge >= self._purge_interval:
+            self._last_purge = now
+            self.repository.purge_expired()
 
     def issue(
         self,
@@ -67,6 +77,7 @@ class TokenService:
         name: str | None = None,
         personal_access: bool = False,
     ) -> IssuedToken:
+        self._maybe_purge()
         ttl = self.access_ttl if ttl is None else ttl
         sub = None if user_id is None else str(user_id)
         access_token = self.encoder.encode(

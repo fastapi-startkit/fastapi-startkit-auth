@@ -117,12 +117,28 @@ Any object implementing the `UserProvider` protocol
 | `POST /oauth/token` | Unified token endpoint: `password`, `refresh_token`, `client_credentials`, `authorization_code` |
 | `POST /token` | Simple password grant (FastAPI-tutorial style) |
 | `POST /oauth/authorize` | Approve an auth-code request (requires an authenticated user) → returns `code` |
-| `POST /oauth/introspect` | RFC 7662 token introspection |
-| `POST /oauth/revoke` | RFC 7009 access/refresh token revocation |
+| `POST /oauth/introspect` | RFC 7662 token introspection (**requires client authentication**) |
+| `POST /oauth/revoke` | RFC 7009 access/refresh token revocation (**requires client authentication**) |
 | `POST/GET /oauth/clients`, `DELETE /oauth/clients/{id}` | Client registration & management |
 | `POST/GET /oauth/personal-access-tokens`, `DELETE .../{jti}` | Personal access tokens |
-| `POST /password/email` | Send a password-reset token |
+| `POST /password/email` | Trigger a password-reset token (delivered out-of-band; see below) |
 | `POST /password/reset` | Reset the password with a token |
+
+### Password resets
+
+`POST /password/email` always returns the same generic response whether or not
+the account exists (no user enumeration) and **never** puts the token in the
+response body. Configure how the token reaches the user with a notifier:
+
+```python
+class AuthConfig(BaseAuthConfig):
+    password_reset_notifier = staticmethod(lambda email, token: send_email(email, token))
+    # debug_expose_reset_token = True   # DEV ONLY: echo the token in the response
+```
+
+The `code_challenge` for public clients is mandatory — a public (secretless)
+client cannot obtain an authorization code without PKCE, and codes are verified
+against the `code_verifier` at exchange.
 
 ### Example: password grant
 

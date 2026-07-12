@@ -58,6 +58,9 @@ class AuthManager:
         )
         self.client_repository = InMemoryClientRepository(hasher=self.hasher)
 
+        self._notifier = cfg.get("password_reset_notifier")
+        self.debug_expose_reset_token = bool(cfg.get("debug_expose_reset_token", False))
+
         self._providers: dict[str, UserProvider] = {
             name: self._build_provider(spec) for name, spec in cfg.get("providers", {}).items()
         }
@@ -106,6 +109,7 @@ class AuthManager:
             hasher=self.hasher,
             expire_minutes=spec.get("expire", 60),
             throttle_seconds=spec.get("throttle", 60),
+            notifier=self._notifier,
         )
 
     def _resolve_broker_provider(self, name: str | None) -> UserProvider:

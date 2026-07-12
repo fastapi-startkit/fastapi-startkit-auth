@@ -30,6 +30,9 @@ def app(seeded_provider):
         key = "integration-test-secret-key-32-bytes-min!"
         bcrypt_rounds = 4
         access_token_ttl = 3600
+        # Tests read the reset token from the response; production leaves this off
+        # and delivers via the notifier. Covered directly in test_security_fixes.
+        debug_expose_reset_token = True
         default = {"guard": "api", "passwords": "users"}
         guards = {"api": {"driver": "passport", "provider": "users"}}
         providers = {"users": {"driver": "instance", "instance": provider}}
