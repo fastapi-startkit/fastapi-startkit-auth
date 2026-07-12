@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fastapi-passport"
+version = "0.1.0"
+description = "Passport-style OAuth2 + JWT authentication package for FastAPI (guards, providers, grants, scopes, personal access tokens, password resets)."
+readme = "readme.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "FastAPI Startkit" }]
+keywords = ["fastapi", "oauth2", "jwt", "auth", "passport", "authentication"]
+dependencies = [
+    "fastapi>=0.110",
+    "pyjwt>=2.8",
+    "bcrypt>=4.1",
+    "pydantic>=2",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+masoniteorm = ["masoniteorm>=2.18"]
+test = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+addopts = "-q"
