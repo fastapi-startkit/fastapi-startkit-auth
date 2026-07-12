@@ -14,6 +14,7 @@ from .exceptions import (
     InvalidClient,
     InvalidGrant,
     InvalidRequest,
+    ThrottleException,
     UnauthorizedClient,
     UnsupportedGrantType,
 )
@@ -336,10 +337,15 @@ def build_router(prefix: str = "") -> APIRouter:
         # endpoint can't be used to enumerate accounts. The token is delivered
         # out-of-band via the configured notifier, never in the HTTP response
         # (unless debug_expose_reset_token is explicitly enabled).
+        #
+        # A throttled request is also swallowed to a generic 200: throttling only
+        # fires for existing accounts, so surfacing a 429 would let two rapid
+        # requests distinguish registered from unregistered emails. The broker
+        # still enforces the throttle server-side (no extra notification is sent).
         generic = {"status": "If that account exists, a reset link has been sent."}
         try:
             token = manager.broker().send_reset_link(body.email)
-        except InvalidGrant:
+        except (InvalidGrant, ThrottleException):
             return generic
         if manager.debug_expose_reset_token:
             return {**generic, "token": token}
