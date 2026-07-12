@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fastapi-passport"
+name = "fastapi-startkit-auth"
 version = "0.1.0"
 description = "Passport-style OAuth2 + JWT authentication package for FastAPI (guards, providers, grants, scopes, personal access tokens, password resets)."
 readme = "readme.md"

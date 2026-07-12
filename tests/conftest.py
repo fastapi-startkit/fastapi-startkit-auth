@@ -2,15 +2,15 @@ import pytest
 from fastapi import Depends
 from fastapi.testclient import TestClient
 
-from fastapi_passport import (
+from fastapi_startkit_auth import (
     Application,
     AuthProvider,
     AuthConfig,
     current_user,
     require_scopes,
 )
-from fastapi_passport.security.hashing import BcryptHasher
-from fastapi_passport.providers.memory import InMemoryUserProvider
+from fastapi_startkit_auth.security.hashing import BcryptHasher
+from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 
 
 @pytest.fixture

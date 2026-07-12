@@ -2,11 +2,11 @@ import time
 
 import pytest
 
-from fastapi_passport.exceptions import InvalidGrant, ThrottleException
-from fastapi_passport.security.hashing import BcryptHasher
-from fastapi_passport.providers.memory import InMemoryUserProvider
-from fastapi_passport.passwords.repository import InMemoryPasswordResetRepository
-from fastapi_passport.passwords.broker import PasswordBroker
+from fastapi_startkit_auth.exceptions import InvalidGrant, ThrottleException
+from fastapi_startkit_auth.security.hashing import BcryptHasher
+from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
+from fastapi_startkit_auth.passwords.repository import InMemoryPasswordResetRepository
+from fastapi_startkit_auth.passwords.broker import PasswordBroker
 
 
 @pytest.fixture

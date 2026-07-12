@@ -3,10 +3,10 @@ config shape from the user sketch, using a fake active-record model so the ORM
 stays an optional dependency."""
 from __future__ import annotations
 
-from fastapi_passport.config import AuthConfig
-from fastapi_passport.manager import AuthManager
-from fastapi_passport.providers.model import ModelUserProvider
-from fastapi_passport.security.hashing import BcryptHasher
+from fastapi_startkit_auth.config import AuthConfig
+from fastapi_startkit_auth.manager import AuthManager
+from fastapi_startkit_auth.providers.model import ModelUserProvider
+from fastapi_startkit_auth.security.hashing import BcryptHasher
 
 
 class FakeQuery:

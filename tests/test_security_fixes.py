@@ -6,15 +6,15 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from fastapi_passport import Application, AuthProvider, AuthConfig
-from fastapi_passport.security.hashing import BcryptHasher
-from fastapi_passport.providers.memory import InMemoryUserProvider
-from fastapi_passport.tokens.repository import InMemoryTokenRepository
-from fastapi_passport.tokens.service import TokenService
-from fastapi_passport.security.jwt import JWTEncoder
-from fastapi_passport.clients.models import Client
-from fastapi_passport.grants.authorization_code import AuthorizationCodeGrant
-from fastapi_passport.exceptions import InvalidGrant
+from fastapi_startkit_auth import Application, AuthProvider, AuthConfig
+from fastapi_startkit_auth.security.hashing import BcryptHasher
+from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
+from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
+from fastapi_startkit_auth.tokens.service import TokenService
+from fastapi_startkit_auth.security.jwt import JWTEncoder
+from fastapi_startkit_auth.clients.models import Client
+from fastapi_startkit_auth.grants.authorization_code import AuthorizationCodeGrant
+from fastapi_startkit_auth.exceptions import InvalidGrant
 
 
 def s256(verifier: str) -> str:

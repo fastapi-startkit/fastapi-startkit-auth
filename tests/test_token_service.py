@@ -1,9 +1,9 @@
 import pytest
 
-from fastapi_passport.exceptions import InvalidGrant, InvalidToken
-from fastapi_passport.security.jwt import JWTEncoder
-from fastapi_passport.tokens.repository import InMemoryTokenRepository
-from fastapi_passport.tokens.service import TokenService
+from fastapi_startkit_auth.exceptions import InvalidGrant, InvalidToken
+from fastapi_startkit_auth.security.jwt import JWTEncoder
+from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
+from fastapi_startkit_auth.tokens.service import TokenService
 
 SECRET = "unit-test-secret-key-at-least-32-bytes!!"
 
