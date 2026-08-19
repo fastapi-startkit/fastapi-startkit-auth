@@ -1,16 +1,41 @@
-[build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "fastapi-startkit-auth"
 version = "0.1.0"
 description = "Passport-style OAuth2 + JWT authentication package for FastAPI (guards, providers, grants, scopes, personal access tokens, password resets)."
 readme = "readme.md"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+    "fastapi",
+    "oauth2",
+    "jwt",
+    "auth",
+    "passport",
+    "authentication",
+    "authorization",
+    "security",
+    "tokens",
+    "starter-kit",
+]
+authors = [
+    {name = "Bedram Tamang", email = "tmgbedu@gmail.com"}
+]
 requires-python = ">=3.9"
-license = { text = "MIT" }
-authors = [{ name = "FastAPI Startkit" }]
-keywords = ["fastapi", "oauth2", "jwt", "auth", "passport", "authentication"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Session",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "fastapi>=0.110",
     "pyjwt>=2.8",
@@ -19,19 +44,47 @@ dependencies = [
     "python-multipart>=0.0.9",
 ]
 
+[project.urls]
+Homepage = "https://github.com/fastapi-startkit/fastapi-startkit-auth"
+Documentation = "https://github.com/fastapi-startkit/fastapi-startkit-auth#readme"
+Repository = "https://github.com/fastapi-startkit/fastapi-startkit-auth"
+Issues = "https://github.com/fastapi-startkit/fastapi-startkit-auth/issues"
+Changelog = "https://github.com/fastapi-startkit/fastapi-startkit-auth/releases"
+
 [project.optional-dependencies]
-masoniteorm = ["masoniteorm>=2.18"]
+masoniteorm = ["masonite-orm>=2.18"]
 test = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "ruff>=0.9.0",
+    "twine>=6.0.0",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F401"]
+fixable = ["F401"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 addopts = "-q"
+norecursedirs = [".venv", "dist", "build", "__pycache__"]
+
+[build-system]
+requires = ["uv_build>=0.10.10,<0.11.0"]
+build-backend = "uv_build"

@@ -174,6 +174,28 @@ pip install -e ".[test]"
 pytest
 ```
 
+Or with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync --group dev
+uv run pytest
+```
+
+## Releasing
+
+Releases are cut from `main` with the release script (maintainers only):
+
+```bash
+./bin/release.sh          # patch bump
+./bin/release.sh minor    # or: major
+```
+
+The script bumps the version, builds sdist + wheel, validates them with
+`twine check`, uploads to PyPI, then commits, tags `vX.Y.Z`, and creates a
+GitHub release. It requires `uv`, `gh` (authenticated), and PyPI credentials
+for `twine` (e.g. a `pypi-*` API token via `TWINE_USERNAME=__token__` /
+`TWINE_PASSWORD` or `~/.pypirc`).
+
 ## License
 
 MIT
