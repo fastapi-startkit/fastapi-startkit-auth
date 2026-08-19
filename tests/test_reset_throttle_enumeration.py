@@ -1,36 +1,14 @@
 """Regression tests for task #894: the password-reset throttle must not leak
 account existence. Rapid repeated requests for a known vs unknown email must be
 indistinguishable at the HTTP boundary (no 429 leak), while the server still
-throttles (the notifier is not invoked beyond the throttle allowance)."""
-from fastapi.testclient import TestClient
+throttles (the notifier is not invoked beyond the throttle allowance).
 
-from fastapi_startkit_auth import Application, AuthProvider, AuthConfig
-from fastapi_startkit_auth.security.hashing import BcryptHasher
-from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
+A real throttle window (throttle=60, not 0) is required so a rapid second
+request is actually throttled."""
 
 
-def build():
-    hasher = BcryptHasher(rounds=4)
-    provider = InMemoryUserProvider(hasher=hasher, username_field="email")
-    provider.add({"id": 1, "email": "ada@example.com", "password": hasher.make("secret")})
-
-    sent: list[tuple[str, str]] = []
-
-    class Config(AuthConfig):
-        key = "throttle-enum-secret-key-32-bytes-minimum!!"
-        bcrypt_rounds = 4
-        password_reset_notifier = staticmethod(lambda email, token: sent.append((email, token)))
-        default = {"guard": "api", "passwords": "users"}
-        guards = {"api": {"driver": "passport", "provider": "users"}}
-        providers = {"users": {"driver": "instance", "instance": provider}}
-        # A real throttle window (not 0) so a rapid second request is throttled.
-        passwords = {"users": {"provider": "users", "expire": 60, "throttle": 60}}
-
-    return TestClient(Application([(AuthProvider, Config)]).api), sent
-
-
-def test_rapid_requests_for_known_email_do_not_leak_429():
-    client, sent = build()
+def test_rapid_requests_for_known_email_do_not_leak_429(auth_client):
+    client, sent = auth_client(throttle=60)
     first = client.post("/password/email", json={"email": "ada@example.com"})
     second = client.post("/password/email", json={"email": "ada@example.com"})
     assert first.status_code == 200
@@ -40,8 +18,8 @@ def test_rapid_requests_for_known_email_do_not_leak_429():
     assert len(sent) == 1
 
 
-def test_known_and_unknown_emails_are_indistinguishable_under_rapid_requests():
-    client, sent = build()
+def test_known_and_unknown_emails_are_indistinguishable_under_rapid_requests(auth_client):
+    client, sent = auth_client(throttle=60)
     known1 = client.post("/password/email", json={"email": "ada@example.com"})
     known2 = client.post("/password/email", json={"email": "ada@example.com"})
     unknown1 = client.post("/password/email", json={"email": "ghost@example.com"})
@@ -58,8 +36,8 @@ def test_known_and_unknown_emails_are_indistinguishable_under_rapid_requests():
     assert [e for e, _ in sent] == ["ada@example.com"]
 
 
-def test_notifier_not_invoked_beyond_throttle():
-    client, sent = build()
+def test_notifier_not_invoked_beyond_throttle(auth_client):
+    client, sent = auth_client(throttle=60)
     for _ in range(5):
         client.post("/password/email", json={"email": "ada@example.com"})
     assert len(sent) == 1  # only the first, throttle-permitted request delivers

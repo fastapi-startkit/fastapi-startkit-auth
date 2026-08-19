@@ -1,12 +1,3 @@
-import base64
-import hashlib
-
-
-def s256(verifier: str) -> str:
-    digest = hashlib.sha256(verifier.encode()).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-
-
 def get_token(client, username="ada@example.com", password="secret", scope="read write"):
     resp = client.post("/oauth/token", data={
         "grant_type": "password", "username": username, "password": password, "scope": scope,
@@ -108,7 +99,7 @@ def test_client_credentials_rejects_bad_secret(client):
     assert resp.status_code == 401
 
 
-def test_authorization_code_flow_with_pkce(client):
+def test_authorization_code_flow_with_pkce(client, s256):
     reg = client.post("/oauth/clients", json={
         "name": "spa", "confidential": False, "redirect_uris": ["https://spa.example/cb"],
     }).json()

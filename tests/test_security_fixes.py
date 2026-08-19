@@ -1,12 +1,15 @@
-"""Regression tests for the security findings on PR #1 (task #892)."""
+"""Regression tests for the security findings on PR #1 (task #892).
+
+The secure-by-default app (debug reset-token echo OFF) comes from the shared
+``auth_client`` fixture in conftest; only tests that opt into the debug echo
+pass ``debug_expose=True``.
+"""
 import base64
-import hashlib
 import time
 
 import pytest
-from fastapi.testclient import TestClient
 
-from fastapi_startkit_auth import Application, AuthProvider, AuthConfig
+from fastapi_startkit_auth import AuthConfig
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
@@ -17,36 +20,9 @@ from fastapi_startkit_auth.grants.authorization_code import AuthorizationCodeGra
 from fastapi_startkit_auth.exceptions import InvalidGrant
 
 
-def s256(verifier: str) -> str:
-    return base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
-
-
-def build_client(*, notifier=None, debug_expose=False):
-    """A secure-by-default app: debug echo OFF unless explicitly requested."""
-    hasher = BcryptHasher(rounds=4)
-    provider = InMemoryUserProvider(hasher=hasher, username_field="email")
-    provider.add({"id": 1, "email": "ada@example.com", "password": hasher.make("secret")})
-
-    captured = []
-
-    class Config(AuthConfig):
-        key = "security-fixes-secret-key-32-bytes-minimum!"
-        bcrypt_rounds = 4
-        debug_expose_reset_token = debug_expose
-        password_reset_notifier = staticmethod(notifier) if notifier else None
-        default = {"guard": "api", "passwords": "users"}
-        guards = {"api": {"driver": "passport", "provider": "users"}}
-        providers = {"users": {"driver": "instance", "instance": provider}}
-        passwords = {"users": {"provider": "users", "expire": 60, "throttle": 0}}
-
-    app = Application([(AuthProvider, Config)])
-    return TestClient(app.api), captured
-
-
 # --- Finding 1: password-reset token must never leak in the response -----
-def test_password_email_response_contains_no_token_by_default():
-    captured = []
-    client, _ = build_client(notifier=lambda email, token: captured.append((email, token)))
+def test_password_email_response_contains_no_token_by_default(auth_client):
+    client, captured = auth_client()
 
     resp = client.post("/password/email", json={"email": "ada@example.com"})
     assert resp.status_code == 200
@@ -61,24 +37,24 @@ def test_password_email_response_contains_no_token_by_default():
     assert ok.status_code == 200
 
 
-def test_debug_flag_can_expose_token_but_is_off_by_default():
+def test_debug_flag_can_expose_token_but_is_off_by_default(auth_client):
     assert AuthConfig.debug_expose_reset_token is False
-    client, _ = build_client(debug_expose=True)
+    client, _ = auth_client(debug_expose=True)
     resp = client.post("/password/email", json={"email": "ada@example.com"})
     assert resp.json().get("token")  # opt-in only
 
 
 # --- Finding 4: no account enumeration via /password/email or grant ------
-def test_password_email_unknown_account_is_indistinguishable():
-    client, _ = build_client()
+def test_password_email_unknown_account_is_indistinguishable(auth_client):
+    client, _ = auth_client()
     known = client.post("/password/email", json={"email": "ada@example.com"})
     unknown = client.post("/password/email", json={"email": "ghost@example.com"})
     assert known.status_code == unknown.status_code == 200
     assert known.json() == unknown.json()  # identical, non-enumerable response
 
 
-def test_password_grant_same_error_for_unknown_user_and_wrong_password():
-    client, _ = build_client()
+def test_password_grant_same_error_for_unknown_user_and_wrong_password(auth_client):
+    client, _ = auth_client()
     wrong_pw = client.post("/oauth/token", data={
         "grant_type": "password", "username": "ada@example.com", "password": "nope"})
     unknown = client.post("/oauth/token", data={
@@ -94,8 +70,8 @@ def test_provider_dummy_verify_exists():
 
 
 # --- Finding 2: PKCE enforced for public clients -------------------------
-def test_public_client_cannot_get_code_without_pkce():
-    client, _ = build_client()
+def test_public_client_cannot_get_code_without_pkce(auth_client):
+    client, _ = auth_client()
     reg = client.post("/oauth/clients", json={
         "name": "spa", "confidential": False, "redirect_uris": ["https://spa/cb"]}).json()
     token = client.post("/oauth/token", data={
@@ -122,8 +98,8 @@ def test_exchange_rejects_challengeless_code_without_client_auth():
                      code_verifier=None, client_authenticated=False)
 
 
-def test_public_client_full_pkce_flow_still_works():
-    client, _ = build_client()
+def test_public_client_full_pkce_flow_still_works(auth_client, s256):
+    client, _ = auth_client()
     reg = client.post("/oauth/clients", json={
         "name": "spa", "confidential": False, "redirect_uris": ["https://spa/cb"]}).json()
     token = client.post("/oauth/token", data={
@@ -140,22 +116,22 @@ def test_public_client_full_pkce_flow_still_works():
 
 
 # --- Finding 3: introspect + revoke require client authentication --------
-def test_introspect_requires_client_auth():
-    client, _ = build_client()
+def test_introspect_requires_client_auth(auth_client):
+    client, _ = auth_client()
     token = client.post("/oauth/token", data={
         "grant_type": "password", "username": "ada@example.com", "password": "secret"}).json()["access_token"]
     assert client.post("/oauth/introspect", data={"token": token}).status_code == 401
 
 
-def test_revoke_requires_client_auth():
-    client, _ = build_client()
+def test_revoke_requires_client_auth(auth_client):
+    client, _ = auth_client()
     token = client.post("/oauth/token", data={
         "grant_type": "password", "username": "ada@example.com", "password": "secret"}).json()["access_token"]
     assert client.post("/oauth/revoke", data={"token": token}).status_code == 401
 
 
-def test_introspect_and_revoke_accept_basic_auth():
-    client, _ = build_client()
+def test_introspect_and_revoke_accept_basic_auth(auth_client):
+    client, _ = auth_client()
     reg = client.post("/oauth/clients", json={"name": "rs", "confidential": True}).json()
     basic = base64.b64encode(f"{reg['id']}:{reg['secret']}".encode()).decode()
     headers = {"Authorization": f"Basic {basic}"}
@@ -167,8 +143,8 @@ def test_introspect_and_revoke_accept_basic_auth():
 
 
 # --- Finding 5: redirect_to query params are URL-encoded -----------------
-def test_redirect_to_url_encodes_state():
-    client, _ = build_client()
+def test_redirect_to_url_encodes_state(auth_client, s256):
+    client, _ = auth_client()
     reg = client.post("/oauth/clients", json={
         "name": "spa", "confidential": False, "redirect_uris": ["https://spa/cb"]}).json()
     token = client.post("/oauth/token", data={
