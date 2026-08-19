@@ -46,7 +46,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/fastapi-startkit/fastapi-startkit-auth"
-Documentation = "https://github.com/fastapi-startkit/fastapi-startkit-auth#readme"
+Documentation = "https://fastapi-startkit.github.io/fastapi-startkit-auth/"
 Repository = "https://github.com/fastapi-startkit/fastapi-startkit-auth"
 Issues = "https://github.com/fastapi-startkit/fastapi-startkit-auth/issues"
 Changelog = "https://github.com/fastapi-startkit/fastapi-startkit-auth/releases"
@@ -57,6 +57,10 @@ test = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
 ]
 
 [dependency-groups]
