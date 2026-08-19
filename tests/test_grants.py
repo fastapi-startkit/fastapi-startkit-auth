@@ -1,6 +1,3 @@
-import base64
-import hashlib
-
 import pytest
 
 from fastapi_startkit_auth.exceptions import InvalidGrant
@@ -32,11 +29,6 @@ def users():
     p = InMemoryUserProvider(hasher=hasher, username_field="username")
     p.add({"id": 1, "username": "ada", "password": hasher.make("secret")})
     return p
-
-
-def s256(verifier: str) -> str:
-    digest = hashlib.sha256(verifier.encode()).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
 # --- password grant ------------------------------------------------------
@@ -78,7 +70,7 @@ def test_refresh_grant(service, users):
 
 
 # --- authorization code + PKCE ------------------------------------------
-def test_pkce_verify_s256():
+def test_pkce_verify_s256(s256):
     verifier = "abc123abc123abc123abc123abc123abc123abc123xyz"
     assert verify_pkce(verifier, s256(verifier), "S256") is True
     assert verify_pkce("wrong", s256(verifier), "S256") is False
@@ -89,7 +81,7 @@ def test_pkce_verify_plain():
     assert verify_pkce("plainverifier", "other", "plain") is False
 
 
-def test_authorization_code_flow_with_pkce(service):
+def test_authorization_code_flow_with_pkce(service, s256):
     grant = AuthorizationCodeGrant(service)
     client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
     verifier = "verifier-verifier-verifier-verifier-1234567890"
@@ -101,7 +93,7 @@ def test_authorization_code_flow_with_pkce(service):
     assert service.authenticate(issued.access_token)["sub"] == "1"
 
 
-def test_authorization_code_rejects_bad_verifier(service):
+def test_authorization_code_rejects_bad_verifier(service, s256):
     grant = AuthorizationCodeGrant(service)
     client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
     verifier = "verifier-verifier-verifier-verifier-1234567890"
@@ -113,7 +105,7 @@ def test_authorization_code_rejects_bad_verifier(service):
         grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier="attacker")
 
 
-def test_authorization_code_is_single_use(service):
+def test_authorization_code_is_single_use(service, s256):
     grant = AuthorizationCodeGrant(service)
     client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
     verifier = "verifier-verifier-verifier-verifier-1234567890"
@@ -126,7 +118,7 @@ def test_authorization_code_is_single_use(service):
         grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier=verifier)
 
 
-def test_authorization_code_rejects_redirect_uri_mismatch(service):
+def test_authorization_code_rejects_redirect_uri_mismatch(service, s256):
     grant = AuthorizationCodeGrant(service)
     client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
     verifier = "verifier-verifier-verifier-verifier-1234567890"
