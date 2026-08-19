@@ -2,6 +2,8 @@
 
 Passport-style OAuth2 + JWT authentication for FastAPI.
 
+📖 **Documentation:** <https://fastapi-startkit.github.io/fastapi-startkit-auth/>
+
 `fastapi-startkit-auth` brings the ergonomics of [Laravel Passport](https://laravel.com/docs/13.x/passport)
 to FastAPI: a config-driven guard/provider/passwords model layered on top of
 OAuth2 grants and signed JWT access tokens (per the
