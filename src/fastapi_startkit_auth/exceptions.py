@@ -62,6 +62,13 @@ class InvalidToken(AuthError):
     status_code = 401
 
 
+class InvalidSession(AuthError):
+    """The session cookie is missing, expired, or no longer valid."""
+
+    error = "invalid_session"
+    status_code = 401
+
+
 class InsufficientScope(AuthError):
     """The token does not carry the scopes required for this resource."""
 

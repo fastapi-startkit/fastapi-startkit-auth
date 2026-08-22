@@ -36,8 +36,8 @@ def test_guard_spec_defaults_to_passport_driver():
 
 
 def test_unknown_guard_driver_raises_clear_error():
-    with pytest.raises(ValueError, match="Unknown auth guard driver: 'session'"):
-        AuthManager(_config({"web": {"driver": "session", "provider": "users"}}))
+    with pytest.raises(ValueError, match="Unknown auth guard driver: 'quantum'"):
+        AuthManager(_config({"web": {"driver": "quantum", "provider": "users"}}))
 
 
 def test_custom_guard_driver_can_be_registered_and_resolved():

@@ -24,13 +24,24 @@ def get_auth_manager(request: Request) -> AuthManager:
 
 
 def current_context(
+    request: Request,
     token: str | None = Depends(_bearer),
     manager: AuthManager = Depends(get_auth_manager),
 ) -> AuthContext:
-    """Resolve the bearer token to an :class:`AuthContext` or raise 401."""
+    """Resolve the request credential to an :class:`AuthContext` or raise 401.
+
+    The default guard decides the mechanism: guards that implement
+    ``authenticate(request)`` (session driver) read the request/cookie state,
+    everything else takes the bearer-token path. Route code is identical either
+    way.
+    """
+    guard = manager.guard()
+    authenticate = getattr(guard, "authenticate", None)
+    if authenticate is not None:
+        return authenticate(request)
     if not token:
         raise InvalidToken("Not authenticated.")
-    return manager.guard().user_from_token(token)
+    return guard.user_from_token(token)
 
 
 def current_user(context: AuthContext = Depends(current_context)) -> Any:
@@ -41,14 +52,19 @@ def current_user(context: AuthContext = Depends(current_context)) -> Any:
 
 
 def optional_user(
+    request: Request,
     token: str | None = Depends(_bearer),
     manager: AuthManager = Depends(get_auth_manager),
 ) -> Any | None:
     """Return the authenticated user, or ``None`` if unauthenticated/invalid."""
-    if not token:
-        return None
+    guard = manager.guard()
+    authenticate = getattr(guard, "authenticate", None)
     try:
-        return manager.guard().user_from_token(token).user
+        if authenticate is not None:
+            return authenticate(request).user
+        if not token:
+            return None
+        return guard.user_from_token(token).user
     except AuthError:
         return None
 
