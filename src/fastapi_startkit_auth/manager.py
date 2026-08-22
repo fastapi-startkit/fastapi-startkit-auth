@@ -106,6 +106,12 @@ class AuthManager:
         Guards are constructed by their ``spec["driver"]`` rather than hardcoded,
         so future modes (``session``, ``token``) register alongside the built-in
         ``passport`` driver without touching the resolution logic.
+
+        Ordering: config-declared guards are built during ``__init__`` right after
+        the ``passport`` driver registers, so calling this post-construction does
+        NOT retroactively build config-declared guards — register custom drivers
+        before or at construction (e.g. in a subclass ``__init__`` before
+        ``super().__init__``, or by extending this manager).
         """
         self._guard_drivers[driver] = factory
 
