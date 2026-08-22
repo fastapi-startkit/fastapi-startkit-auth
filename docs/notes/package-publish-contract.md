@@ -22,9 +22,17 @@ package assets, so Phase 2 (SPA auth) can ship the `auth:cors` stub.
   not publishable as-is.
 
 The roadmap's assumed contract (a `publishable/` directory + a `manifest` file +
-`package:publish auth:cors`) is **not** how the framework works today. Phase 2 needs
-either a small framework change (tag support / a `package:publish` alias) or must adapt
+`package:publish auth:cors`) is **not** how the framework works today. Phase 2 adapts
 to the provider-driven mechanism described below.
+
+> **Decision (task #1503, confirmed by PM).** Phase 2 uses the provider-driven flow
+> as-is — no framework change. The auth package ships a framework-native
+> **`AuthServiceProvider`** (extends `fastapi_startkit.support.Provider`, sets
+> `provider_key`, added to the app's `providers=[...]`) that publishes the CORS stub
+> via `self.publishes({...})`. Users publish with **`provider:publish -p auth`**.
+> `fastapi-startkit` is an **optional extra** (`fastapi-startkit-auth[startkit]`); the
+> package still works standalone on plain FastAPI and the provider activates only when
+> the app opts in. The `package:publish`/manifest/tag approach is dropped.
 
 ## How publishing actually works
 
@@ -132,31 +140,26 @@ Package defaults are merged so a published file only *overrides*:
 - The publish API (`publishes`, `provider_key`, `provider:publish`) is stable in 0.51.0
   but the `tag` parameter is effectively unimplemented — do not design against it.
 
-## Gap analysis for `auth:cors` (Phase 2 enabler)
+## Confirmed approach for `auth:cors` (Phase 2 enabler)
 
-To ship a publishable `auth:cors` stub the way the roadmap imagines, one of these is
-needed — **flag this decision to the PM before Phase 2 starts**:
+**Decision (task #1503):** adapt to the framework's provider-driven flow as-is — no
+framework change. Concretely, Phase 2 will:
 
-1. **Adapt to the framework as-is (lowest friction).** Add a framework-native
-   `Provider` in the auth package (e.g. `provider_key = "auth"`) that calls
-   `self.publishes({<pkg>/publishable/cors.py: "config/cors.py"})`. Users publish with
-   `provider:publish -p auth`. No `auth:cors` tag — the whole auth provider's assets
-   publish together. Requires adding `fastapi-startkit` as an optional dependency.
+1. **Ship a framework-native `AuthServiceProvider`** in the auth package that extends
+   `fastapi_startkit.support.Provider`, sets `provider_key = "auth"`, and registers the
+   stub with `self.publishes({<pkg>/publishable/cors.py: "config/cors.py"})`. Import it
+   lazily so it only loads when the framework is installed.
+2. **Publish with the real command** `provider:publish -p auth`. There is no `auth:cors`
+   tag — the auth provider's assets publish together (only the CORS stub for now).
+3. **Take `fastapi-startkit` as an optional extra** (`fastapi-startkit-auth[startkit]`).
+   The package keeps working standalone on plain FastAPI; the provider activates only
+   when the app installs the extra and lists it in `providers=[...]`.
 
-2. **Add tag support upstream (framework change).** Implement the `tag` parameter in
-   `Provider.publishes()` + a positional/tag filter on `provider:publish` (and possibly
-   a `package:publish` alias) so `provider:publish auth:cors` selects just the CORS
-   stub. This is a framework-repo task, not an auth-package task, and would gate Phase 2.
-
-3. **Dedicated tiny provider per asset.** Ship a `CorsProvider`
-   (`provider_key = "auth_cors"`) whose only job is `publishes({...: "config/cors.py"})`,
-   selected via `provider:publish -p auth_cors`. Gets close to `auth:cors` ergonomics
-   without a framework change, at the cost of an extra provider class.
-
-**Recommendation:** Option 1 or 3 (no framework change, keeps Phase 2 self-contained).
-Option 1 is simplest; Option 3 gives cleaner per-asset selection. Confirm with PM which
-publish ergonomics are acceptable and whether the framework dependency should be an
-optional extra.
+Approaches **not** taken (recorded for context): adding `tag` support / a
+`package:publish` alias upstream in the framework (a framework-repo change that would
+gate Phase 2), and a dedicated per-asset `CorsProvider` (extra class for marginally
+cleaner selection). Both were rejected in favour of the lowest-friction, self-contained
+option above.
 
 ## Sources reviewed
 

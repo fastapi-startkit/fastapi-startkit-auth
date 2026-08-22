@@ -48,11 +48,14 @@ on rather than reinvents:
   single handler. New failures (CSRF mismatch, invalid session) join it.
 - **Hashing** — `BcryptHasher` for credentials; API-token secrets use SHA-256
   (high-entropy random input, bcrypt unnecessary and too slow per-request).
-- **Publish flow** — the readme's `uv run python artisan package:publish
-  auth:cors` is the *framework's* artisan command. This package's contract is
-  to ship publishable stubs in a `publishable/` directory with a small manifest
-  the framework discovers (same shape the framework repo already uses for other
-  packages). We ship stubs; the framework copies them.
+- **Publish flow** — publishing is **provider-driven** (confirmed in task #1500,
+  see [package-publish-contract.md](notes/package-publish-contract.md)). There is
+  no manifest and no `package:publish` command. The package ships a framework-native
+  **`AuthServiceProvider`** (extends `fastapi_startkit.support.Provider`) that calls
+  `self.publishes({...})`; users publish the CORS stub with the framework's real
+  command **`provider:publish -p auth`**. The framework dependency is an **optional
+  extra** (`fastapi-startkit-auth[startkit]`) — the package still runs standalone on
+  plain FastAPI, and the provider only activates when the app registers it.
 
 ---
 
@@ -190,6 +193,10 @@ axios.get('/__auth__/csrf-cookie').then(() => {
 - Config: `spa` section — `stateful_origins` (Sanctum-style list of first-party
   origins that get cookie auth; others must use tokens), `csrf_exempt_paths`,
   csrf cookie name.
+- Publish: `AuthServiceProvider` (framework-native) exposes the CORS stub to the
+  framework's `provider:publish -p auth`. Only available when the app installs the
+  optional `fastapi-startkit-auth[startkit]` extra and registers the provider in its
+  `providers=[...]` list; the package remains fully usable standalone without it.
 
 ### Files / modules
 
@@ -199,8 +206,10 @@ axios.get('/__auth__/csrf-cookie').then(() => {
 | `routes_spa.py` (or extend `routes.py`) | `/__auth__/csrf-cookie` endpoint |
 | `exceptions.py` (change) | `CsrfTokenMismatch(AuthError)` |
 | `sessions/models.py` (change) | `csrf_token` on `SessionRecord`, rotated on login |
-| `publishable/cors.py` + `publishable/manifest` | CORS config stub published by the framework's `artisan package:publish auth:cors` |
+| `provider.py` (change) or `startkit/provider.py` (new) | `AuthServiceProvider(fastapi_startkit.support.Provider)` — `provider_key = "auth"`, calls `self.publishes({<pkg>/publishable/cors.py: "config/cors.py"})`; imported lazily so it only loads when the `[startkit]` extra is present |
+| `publishable/cors.py` | CORS config stub copied into the app by `provider:publish -p auth` |
 | `config.py` (change) | `spa` defaults |
+| `pyproject.toml` (change) | add `startkit = ["fastapi-startkit>=0.51"]` optional extra |
 
 ### Data model & storage
 
@@ -211,14 +220,21 @@ double-submit).
 
 ### Config / publish steps
 
-- `uv run python artisan package:publish auth:cors` copies `publishable/cors.py`
-  into the app's config directory. The stub configures Starlette
-  `CORSMiddleware` with `allow_credentials=True` and an **explicit** origin
-  list (never `*` with credentials) matching `spa.stateful_origins`.
-- The manifest/discovery contract for `package:publish` is being confirmed in a
-  separate parallel investigation (**task #1500**). Its outcome is a hard
-  dependency for this phase's publishable-stub work; the CSRF endpoint and
-  middleware are not blocked by it.
+- `uv run python artisan provider:publish -p auth` copies `publishable/cors.py`
+  into the app's config directory (as `config/cors.py`). The stub configures
+  Starlette `CORSMiddleware` with `allow_credentials=True` and an **explicit**
+  origin list (never `*` with credentials) matching `spa.stateful_origins`.
+- Mechanism (confirmed in **task #1500**, see
+  [package-publish-contract.md](notes/package-publish-contract.md)): publishing is
+  **provider-driven**, not manifest-driven, and there is no `package:publish`
+  command. `AuthServiceProvider.publishes({...})` registers the stub into
+  `application.published_resources`; the framework's `provider:publish` copies it,
+  prompting before overwriting an existing file. Package config defaults are exposed
+  via `merge_config_from` so the published file only *overrides* (use a
+  non-reserved key such as `cors`).
+- Requires the app to install `fastapi-startkit-auth[startkit]` and register
+  `AuthServiceProvider`. The CSRF endpoint and middleware do **not** depend on the
+  framework and work standalone.
 
 ### Security considerations
 
@@ -242,7 +258,8 @@ double-submit).
 - Security tests: token not rotated ⇒ fails after re-login; cross-origin
   request with valid session but foreign Origin rejected.
 - QA checklist: real SPA smoke test (vite + axios demo) against dev server with
-  CORS stub published; confirm `withCredentials` flow end-to-end.
+  CORS stub published via `provider:publish -p auth`; confirm `withCredentials`
+  flow end-to-end.
 
 ---
 
@@ -303,8 +320,9 @@ selected via the `api_tokens` config block.
 
 ### Config / publish steps
 
-None mandatory; document the `api_tokens` config block. If the framework wants
-a publishable config stub later it follows the Phase 2 manifest mechanism.
+None mandatory; document the `api_tokens` config block. If a publishable config
+stub is wanted later it follows the Phase 2 mechanism — a framework-native provider
+calling `self.publishes({...})`, published via `provider:publish` (no manifest).
 
 ### Security considerations
 
@@ -353,6 +371,11 @@ a publishable config stub later it follows the Phase 2 manifest mechanism.
 2. **SQL persistence is in scope.** Sessions (Phase 1) and API tokens
    (Phase 3) each ship a protocol interface, an in-memory default, and a
    SQL-backed implementation selected via config.
-3. **`package:publish` manifest contract** is under a separate parallel
-   investigation (task #1500); its outcome gates Phase 2's publishable
-   `auth:cors` stub.
+3. **Publish contract is provider-driven** (resolved by task #1500, see
+   [package-publish-contract.md](notes/package-publish-contract.md)). There is no
+   manifest and no `package:publish` command. Phase 2 ships a framework-native
+   `AuthServiceProvider` that publishes the CORS stub via `self.publishes({...})`,
+   published with the real command `provider:publish -p auth`. The `fastapi-startkit`
+   framework is an **optional extra** (`fastapi-startkit-auth[startkit]`); the package
+   works standalone on plain FastAPI and the provider activates only when the app
+   opts in.
