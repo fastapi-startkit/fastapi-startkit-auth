@@ -40,6 +40,7 @@ nav:
   - Grants: grants.md
   - Scopes & abilities: scopes.md
   - Password resets: password-resets.md
+  - Auth roadmap: roadmap-auth.md
 
 markdown_extensions:
   - admonition
