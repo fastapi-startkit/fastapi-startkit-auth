@@ -51,3 +51,26 @@ def test_add_returns_stored_user_and_update_password(provider):
     provider.update_password(user, "brand-new-password")
     assert provider.validate_credentials(provider.retrieve_by_id(1), {"password": "brand-new-password"}) is True
     assert provider.validate_credentials(provider.retrieve_by_id(1), {"password": "pw1"}) is False
+
+
+def test_protocol_declares_dummy_verify(provider):
+    # Timing equalization is part of the contract: custom providers get told
+    # (by the protocol) to implement it, not just the shipped ones.
+    from fastapi_startkit_auth.providers.base import UserProvider
+
+    assert callable(getattr(UserProvider, "dummy_verify"))
+    assert isinstance(provider, UserProvider)
+    provider.dummy_verify()  # must not raise
+
+
+def test_provider_without_dummy_verify_fails_the_protocol_check():
+    from fastapi_startkit_auth.providers.base import UserProvider
+
+    class Incomplete:
+        def retrieve_by_id(self, identifier): ...
+        def retrieve_by_credentials(self, credentials): ...
+        def validate_credentials(self, user, credentials): ...
+        def get_identifier(self, user): ...
+        def update_password(self, user, plain): ...
+
+    assert not isinstance(Incomplete(), UserProvider)

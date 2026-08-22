@@ -135,3 +135,28 @@ def test_purge_expired_drops_only_dead_sessions(store):
 
 def test_both_implementations_satisfy_the_protocol(store):
     assert isinstance(store, SessionStore)
+
+
+def _sql_row_count(store):
+    return store._conn.execute(f"SELECT COUNT(*) FROM {store._table}").fetchone()[0]
+
+
+def test_sql_create_opportunistically_purges_expired_rows():
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    store = SqlSessionStore(conn, purge_interval=0)
+    store.create(user_id=1, guard="web", ttl=-1)
+    store.create(user_id=2, guard="web", ttl=-1)
+    alive = store.create(user_id=3, guard="web", ttl=3600)
+    # The expired rows were swept by the purge-on-create; only live ones remain.
+    assert _sql_row_count(store) == 1
+    assert store.find(alive.id) is not None
+
+
+def test_sql_purge_on_create_respects_the_interval():
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    store = SqlSessionStore(conn, purge_interval=3600)
+    store.create(user_id=1, guard="web", ttl=-1)
+    store.create(user_id=2, guard="web", ttl=3600)
+    # Within the interval nothing is swept: the expired row is still on disk
+    # (dead only to find()).
+    assert _sql_row_count(store) == 2

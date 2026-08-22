@@ -44,6 +44,20 @@ class AuthConfig:
         "path": "/",
     }
 
+    # --- SPA settings (CSRF protection on top of session guards) -------
+    # ``enabled`` turns on the ``/__auth__/csrf-cookie`` endpoint and the
+    # double-submit CSRF middleware. ``stateful_origins`` (Sanctum-style) lists
+    # the first-party origins allowed to make cookie-authenticated unsafe
+    # requests; empty disables the Origin check. ``csrf_exempt_paths`` entries
+    # match exactly, or as a prefix when they end with ``*``.
+    spa: dict[str, Any] = {
+        "enabled": False,
+        "csrf_cookie": "XSRF-TOKEN",
+        "csrf_header": "X-XSRF-TOKEN",
+        "csrf_exempt_paths": [],
+        "stateful_origins": [],
+    }
+
     # --- JWT / token settings (overridable) ----------------------------
     key: str | None = None
     algorithm: str = "HS256"

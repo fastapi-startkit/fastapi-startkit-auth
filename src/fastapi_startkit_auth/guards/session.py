@@ -70,6 +70,10 @@ class SessionGuard:
         setattr(request.state, FORGET_KEY, True)
 
     def _context(self, record: SessionRecord) -> AuthContext:
+        if record.user_id is None:
+            # Guest session (issued by /__auth__/csrf-cookie): it carries a CSRF
+            # token but no user, and must survive 401s so the SPA can log in.
+            raise InvalidSession("Not authenticated.")
         user = self.provider.retrieve_by_id(record.user_id)
         if user is None:
             self.store.invalidate(record.id)

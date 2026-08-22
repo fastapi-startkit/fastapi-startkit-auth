@@ -36,17 +36,29 @@ class SqlSessionStore:
         table: str = "sessions",
         idle_ttl: float | None = None,
         create_table: bool = True,
+        purge_interval: float = 300,
     ) -> None:
         self._conn = connection
         self._table = table
         self._idle_ttl = idle_ttl
         self._lock = threading.Lock()
+        self._purge_interval = purge_interval
+        self._last_purge = time.time()
         if create_table:
             with self._lock:
                 self._conn.execute(_SCHEMA.format(table=table))
                 self._conn.commit()
 
+    def _maybe_purge(self) -> None:
+        """Drop expired rows periodically so the table stays bounded without a
+        scheduler (mirrors ``TokenService``'s purge-on-issue)."""
+        now = time.time()
+        if now - self._last_purge >= self._purge_interval:
+            self._last_purge = now
+            self.purge_expired()
+
     def create(self, *, user_id: Any, guard: str, ttl: float | None) -> SessionRecord:
+        self._maybe_purge()
         now = time.time()
         record = SessionRecord(
             id=generate_session_id(),
