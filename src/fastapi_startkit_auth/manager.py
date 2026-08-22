@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 import warnings
-from typing import Any
+from typing import Any, Callable
 
 from .clients.repository import InMemoryClientRepository
 from .config import as_config_class
@@ -10,7 +10,7 @@ from .grants.authorization_code import AuthorizationCodeGrant
 from .grants.client_credentials import ClientCredentialsGrant
 from .grants.password import PasswordGrant
 from .grants.refresh import RefreshTokenGrant
-from .guards.guard import PassportGuard
+from .guards.guard import Guard, PassportGuard
 from .passwords.broker import PasswordBroker
 from .passwords.repository import InMemoryPasswordResetRepository
 from .providers.base import UserProvider
@@ -20,6 +20,8 @@ from .security.hashing import BcryptHasher
 from .security.jwt import JWTEncoder
 from .tokens.repository import InMemoryTokenRepository
 from .tokens.service import TokenService
+
+GuardFactory = Callable[[str, dict[str, Any]], Guard]
 
 
 class AuthManager:
@@ -64,7 +66,9 @@ class AuthManager:
         self._providers: dict[str, UserProvider] = {
             name: self._build_provider(spec) for name, spec in cfg.get("providers", {}).items()
         }
-        self._guards: dict[str, PassportGuard] = {
+        self._guard_drivers: dict[str, GuardFactory] = {}
+        self.register_guard_driver("passport", self._build_passport_guard)
+        self._guards: dict[str, Guard] = {
             name: self._build_guard(name, spec) for name, spec in cfg.get("guards", {}).items()
         }
         self._brokers: dict[str, PasswordBroker] = {
@@ -96,9 +100,30 @@ class AuthManager:
             )
         raise ValueError(f"Unknown user provider driver: {driver!r}")
 
-    def _build_guard(self, name: str, spec: dict[str, Any]) -> PassportGuard:
-        provider_name = spec.get("provider")
-        provider = self._require_provider(provider_name)
+    def register_guard_driver(self, driver: str, factory: GuardFactory) -> None:
+        """Register a factory that builds a guard for a config ``driver`` key.
+
+        Guards are constructed by their ``spec["driver"]`` rather than hardcoded,
+        so future modes (``session``, ``token``) register alongside the built-in
+        ``passport`` driver without touching the resolution logic.
+
+        Ordering: config-declared guards are built during ``__init__`` right after
+        the ``passport`` driver registers, so calling this post-construction does
+        NOT retroactively build config-declared guards — register custom drivers
+        before or at construction (e.g. in a subclass ``__init__`` before
+        ``super().__init__``, or by extending this manager).
+        """
+        self._guard_drivers[driver] = factory
+
+    def _build_guard(self, name: str, spec: dict[str, Any]) -> Guard:
+        driver = spec.get("driver", "passport")
+        factory = self._guard_drivers.get(driver)
+        if factory is None:
+            raise ValueError(f"Unknown auth guard driver: {driver!r}")
+        return factory(name, spec)
+
+    def _build_passport_guard(self, name: str, spec: dict[str, Any]) -> Guard:
+        provider = self._require_provider(spec.get("provider"))
         return PassportGuard(name=name, token_service=self.token_service, provider=provider)
 
     def _build_broker(self, spec: dict[str, Any]) -> PasswordBroker:
@@ -127,7 +152,7 @@ class AuthManager:
         return self._providers[name]
 
     # --- public accessors ---------------------------------------------
-    def guard(self, name: str | None = None) -> PassportGuard:
+    def guard(self, name: str | None = None) -> Guard:
         name = name or self._config.get("default", {}).get("guard")
         if name not in self._guards:
             raise ValueError(f"Auth guard {name!r} is not defined in AuthConfig.guards")

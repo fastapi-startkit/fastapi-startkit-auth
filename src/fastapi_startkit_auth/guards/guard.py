@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from ..exceptions import InvalidToken
 from ..providers.base import UserProvider
@@ -30,6 +30,23 @@ class AuthContext:
 
     def can_all(self, scopes: list[str]) -> bool:
         return all(self.can(s) for s in scopes)
+
+
+@runtime_checkable
+class Guard(Protocol):
+    """Structural contract every auth guard driver satisfies.
+
+    A guard pairs a named user provider with a mechanism for turning a request
+    credential into an :class:`AuthContext`. ``PassportGuard`` is the only driver
+    today; future ``session`` and ``token`` drivers register their own factories
+    with :class:`~fastapi_startkit_auth.manager.AuthManager` and implement this
+    same surface.
+    """
+
+    name: str
+    provider: UserProvider
+
+    def user_from_token(self, access_token: str) -> AuthContext: ...
 
 
 class PassportGuard:
