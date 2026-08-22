@@ -23,6 +23,14 @@ class UserProvider(Protocol):
     def validate_credentials(self, user: User, credentials: dict[str, Any]) -> bool:
         """Return whether ``credentials`` authenticate ``user``."""
 
+    def dummy_verify(self) -> None:
+        """Burn a credential verification against a throwaway hash.
+
+        Called when ``retrieve_by_credentials`` finds no user, so the
+        absent-user path takes as long as a real password check and login
+        timing does not enumerate accounts.
+        """
+
     def get_identifier(self, user: User) -> Any:
         """Return the primary identifier stored in a token's ``sub`` claim."""
 
