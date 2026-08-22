@@ -27,6 +27,23 @@ class AuthConfig:
     providers: dict[str, dict[str, Any]] = {}
     passwords: dict[str, dict[str, Any]] = {}
 
+    # --- session settings (cookie auth; used by {"driver": "session"} guards) --
+    # ``store`` selects the backend: "memory" (default), "sql" (requires a
+    # DB-API ``connection`` — or zero-arg factory — plus optional ``table``),
+    # or "instance" (a ready-made SessionStore under ``instance``). Overrides
+    # are merged over these defaults, so partial dicts are fine.
+    session: dict[str, Any] = {
+        "store": "memory",
+        "cookie": "startkit_session",
+        "ttl": 7200,
+        "idle_ttl": None,
+        "http_only": True,
+        "same_site": "lax",
+        "secure": True,
+        "domain": None,
+        "path": "/",
+    }
+
     # --- JWT / token settings (overridable) ----------------------------
     key: str | None = None
     algorithm: str = "HS256"

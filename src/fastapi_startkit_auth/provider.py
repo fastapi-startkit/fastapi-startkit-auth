@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from .exceptions import AuthError
 from .manager import AuthManager
+from .middleware.session import SessionMiddleware
 from .routes import build_router
 
 
@@ -34,3 +35,16 @@ class AuthProvider:
         app.state.auth_manager = self.manager
         app.include_router(build_router(prefix=self.prefix))
         app.add_exception_handler(AuthError, _auth_error_handler)
+        if self.manager.has_session_guard():
+            session = self.manager.session_config
+            app.add_middleware(
+                SessionMiddleware,
+                store=self.manager.session_store,
+                cookie=session["cookie"],
+                ttl=session["ttl"],
+                http_only=session["http_only"],
+                same_site=session["same_site"],
+                secure=session["secure"],
+                domain=session["domain"],
+                path=session["path"],
+            )

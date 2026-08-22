@@ -38,6 +38,7 @@ nav:
   - Providers: providers.md
   - HTTP endpoints: endpoints.md
   - Grants: grants.md
+  - Cookie authentication: cookie-auth.md
   - Scopes & abilities: scopes.md
   - Password resets: password-resets.md
   - Auth roadmap: roadmap-auth.md

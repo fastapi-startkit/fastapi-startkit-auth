@@ -5,12 +5,13 @@ import warnings
 from typing import Any, Callable
 
 from .clients.repository import InMemoryClientRepository
-from .config import as_config_class
+from .config import AuthConfig, as_config_class
 from .grants.authorization_code import AuthorizationCodeGrant
 from .grants.client_credentials import ClientCredentialsGrant
 from .grants.password import PasswordGrant
 from .grants.refresh import RefreshTokenGrant
 from .guards.guard import Guard, PassportGuard
+from .guards.session import SessionGuard
 from .passwords.broker import PasswordBroker
 from .passwords.repository import InMemoryPasswordResetRepository
 from .providers.base import UserProvider
@@ -18,6 +19,8 @@ from .providers.memory import InMemoryUserProvider
 from .providers.model import ModelUserProvider
 from .security.hashing import BcryptHasher
 from .security.jwt import JWTEncoder
+from .sessions.sql import SqlSessionStore
+from .sessions.store import InMemorySessionStore, SessionStore
 from .tokens.repository import InMemoryTokenRepository
 from .tokens.service import TokenService
 
@@ -63,11 +66,15 @@ class AuthManager:
         self._notifier = cfg.get("password_reset_notifier")
         self.debug_expose_reset_token = bool(cfg.get("debug_expose_reset_token", False))
 
+        self.session_config = {**AuthConfig.session, **cfg.get("session", {})}
+        self._session_store: SessionStore | None = None
+
         self._providers: dict[str, UserProvider] = {
             name: self._build_provider(spec) for name, spec in cfg.get("providers", {}).items()
         }
         self._guard_drivers: dict[str, GuardFactory] = {}
         self.register_guard_driver("passport", self._build_passport_guard)
+        self.register_guard_driver("session", self._build_session_guard)
         self._guards: dict[str, Guard] = {
             name: self._build_guard(name, spec) for name, spec in cfg.get("guards", {}).items()
         }
@@ -125,6 +132,56 @@ class AuthManager:
     def _build_passport_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
         return PassportGuard(name=name, token_service=self.token_service, provider=provider)
+
+    def _build_session_guard(self, name: str, spec: dict[str, Any]) -> Guard:
+        provider = self._require_provider(spec.get("provider"))
+        if not self.session_config.get("secure", True):
+            warnings.warn(
+                "AuthConfig.session['secure'] is False; the session cookie will be sent "
+                "over plain HTTP. Enable it in production.",
+                stacklevel=2,
+            )
+        return SessionGuard(
+            name=name,
+            store=self.session_store,
+            provider=provider,
+            ttl=self.session_config.get("ttl"),
+        )
+
+    @property
+    def session_store(self) -> SessionStore:
+        """The configured session store, built on first use.
+
+        Lazy so apps without a session guard never pay for (or have to
+        configure) a store — notably the SQL connection.
+        """
+        if self._session_store is None:
+            self._session_store = self._build_session_store()
+        return self._session_store
+
+    def _build_session_store(self) -> SessionStore:
+        spec = self.session_config
+        kind = spec.get("store", "memory")
+        idle_ttl = spec.get("idle_ttl")
+        if kind == "memory":
+            return InMemorySessionStore(idle_ttl=idle_ttl)
+        if kind == "sql":
+            connection = spec.get("connection")
+            if connection is None:
+                raise ValueError('AuthConfig.session with store "sql" requires a "connection".')
+            if callable(connection):
+                connection = connection()
+            return SqlSessionStore(
+                connection,
+                table=spec.get("table", "sessions"),
+                idle_ttl=idle_ttl,
+            )
+        if kind == "instance":
+            return spec["instance"]
+        raise ValueError(f"Unknown session store: {kind!r}")
+
+    def has_session_guard(self) -> bool:
+        return any(isinstance(guard, SessionGuard) for guard in self._guards.values())
 
     def _build_broker(self, spec: dict[str, Any]) -> PasswordBroker:
         provider = self._resolve_broker_provider(spec.get("provider"))

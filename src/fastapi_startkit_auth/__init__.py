@@ -28,6 +28,14 @@ _EXPORTS = {
     "InvalidClient": ("fastapi_startkit_auth.exceptions", "InvalidClient"),
     "InvalidToken": ("fastapi_startkit_auth.exceptions", "InvalidToken"),
     "InsufficientScope": ("fastapi_startkit_auth.exceptions", "InsufficientScope"),
+    "InvalidSession": ("fastapi_startkit_auth.exceptions", "InvalidSession"),
+    "Auth": ("fastapi_startkit_auth.facade", "Auth"),
+    "SessionGuard": ("fastapi_startkit_auth.guards.session", "SessionGuard"),
+    "SessionMiddleware": ("fastapi_startkit_auth.middleware.session", "SessionMiddleware"),
+    "SessionRecord": ("fastapi_startkit_auth.sessions.models", "SessionRecord"),
+    "SessionStore": ("fastapi_startkit_auth.sessions.store", "SessionStore"),
+    "InMemorySessionStore": ("fastapi_startkit_auth.sessions.store", "InMemorySessionStore"),
+    "SqlSessionStore": ("fastapi_startkit_auth.sessions.sql", "SqlSessionStore"),
 }
 
 __all__ = list(_EXPORTS)
