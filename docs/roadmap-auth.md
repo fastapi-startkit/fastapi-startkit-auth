@@ -104,8 +104,9 @@ def logout(auth: Auth = Depends(Auth.scoped)):
   `domain`, `path`).
 - `current_user` / `optional_user` resolve through the default guard, so route
   code is identical for session- and token-authenticated apps.
-- Optional batteries-included router (`/login`, `/logout`) mounted only when
-  enabled in config — Laravel-style apps usually own these routes.
+- The package ships **no** built-in `/login` / `/logout` routes (confirmed
+  decision): it exposes only the `Auth` facade, guards, and session middleware,
+  and the app wires its own routes as in the example above.
 
 ### Files / modules
 
@@ -113,6 +114,7 @@ def logout(auth: Auth = Depends(Auth.scoped)):
 | --- | --- |
 | `sessions/models.py` | `SessionRecord` (id, user_id, guard, csrf_token, created_at, last_activity, expires_at) |
 | `sessions/store.py` | `SessionStore` protocol + `InMemorySessionStore` (mirrors `InMemoryTokenRepository` shape: `create`, `find`, `invalidate`, `regenerate_id`, `purge_expired`) |
+| `sessions/sql.py` | `SqlSessionStore`: persistent SQL implementation of the same protocol (sessions table) |
 | `guards/session.py` | `SessionGuard`: resolves session cookie → `AuthContext(user=..., scopes=["*"])`; `login`/`logout` primitives |
 | `facade.py` | `Auth` request-scoped facade over the manager + request session |
 | `middleware/session.py` | Starlette middleware: read cookie → attach session to `request.state`; set/refresh cookie on response |
@@ -127,6 +129,16 @@ Server-side sessions (opaque random id in the cookie, record in the store) —
 not client-side signed cookies — so logout/revocation is authoritative and the
 model matches the package's existing repository pattern. Session ids are
 generated with `secrets.token_urlsafe(32+)` and looked up by exact key.
+
+Storage ships in three layers (confirmed decision — SQL persistence is in
+scope, not follow-up work):
+
+1. `SessionStore` protocol — the contract everything programs against;
+2. `InMemorySessionStore` — default, tests/demos, matches the OAuth2 stores;
+3. `SqlSessionStore` — persistent implementation backed by a `sessions` table
+   (id PK, user_id, guard, csrf_token, created_at, last_activity, expires_at),
+   selected via config (e.g. `session = {"store": "sql", ...}`), following the
+   same driver-selection style as `providers`.
 
 ### Config / publish steps
 
@@ -203,9 +215,10 @@ double-submit).
   into the app's config directory. The stub configures Starlette
   `CORSMiddleware` with `allow_credentials=True` and an **explicit** origin
   list (never `*` with credentials) matching `spa.stateful_origins`.
-- The manifest format must match what the fastapi-startkit framework's
-  `package:publish` already consumes — verify against the framework repo before
-  implementation and coordinate with the PM if the discovery contract differs.
+- The manifest/discovery contract for `package:publish` is being confirmed in a
+  separate parallel investigation (**task #1500**). Its outcome is a hard
+  dependency for this phase's publishable-stub work; the CSRF endpoint and
+  middleware are not blocked by it.
 
 ### Security considerations
 
@@ -269,6 +282,7 @@ docs will state when to use which.
 | --- | --- |
 | `apitokens/models.py` | `ApiTokenRecord` (id, user_id, name, token_hash, abilities, last_used_at, expires_at, created_at) |
 | `apitokens/repository.py` | `ApiTokenRepository` protocol + in-memory impl (existing repository pattern) |
+| `apitokens/sql.py` | `SqlApiTokenRepository`: persistent SQL implementation of the same protocol (`personal_api_tokens` table) |
 | `apitokens/service.py` | create (generate `{id}|{secret}`, store SHA-256 of secret), verify, revoke, purge |
 | `guards/token.py` | `TokenGuard`: split bearer on `|`, O(1) lookup by id, constant-time hash compare → `AuthContext` |
 | `manager.py` (change) | wire `driver: "token"`, own repository/service |
@@ -280,6 +294,12 @@ Token = `"{record_id}|{secret}"` where secret is `secrets.token_urlsafe(40)`.
 Store only `sha256(secret)`; the id makes lookup O(1) so verification is one
 fetch + one constant-time compare (no scan, no timing side-channel on
 existence).
+
+As with sessions, storage ships in three layers (confirmed decision):
+`ApiTokenRepository` protocol, `InMemoryApiTokenRepository` default, and
+`SqlApiTokenRepository` backed by a `personal_api_tokens` table (id PK,
+user_id, name, token_hash, abilities, last_used_at, expires_at, created_at),
+selected via the `api_tokens` config block.
 
 ### Config / publish steps
 
@@ -324,11 +344,15 @@ a publishable config stub later it follows the Phase 2 manifest mechanism.
   keeping review scope bounded. Each goes through the standard QA + code-review
   loop before the next dependent phase starts.
 
-## Open questions for PM
+## Resolved decisions
 
-1. Should the package ship the optional `/login` / `/logout` routes, or leave
-   them to the framework/app (Laravel leaves them to the app)?
-2. Confirm the `package:publish` manifest contract with the framework repo
-   before Phase 2 (the `auth:cors` publish flow lives framework-side).
-3. Is a persistent (SQL) session/api-token store in scope for these phases, or
-   do we stay on the in-memory + protocol pattern like the OAuth2 stores?
+1. **No built-in login routes.** The package does not ship `/login` /
+   `/logout`; it exposes only the `Auth` facade, guards, and middleware, and
+   the app wires its own routes. (The SPA `/__auth__/csrf-cookie` endpoint is
+   unaffected — it is infrastructure, not a login route.)
+2. **SQL persistence is in scope.** Sessions (Phase 1) and API tokens
+   (Phase 3) each ship a protocol interface, an in-memory default, and a
+   SQL-backed implementation selected via config.
+3. **`package:publish` manifest contract** is under a separate parallel
+   investigation (task #1500); its outcome gates Phase 2's publishable
+   `auth:cors` stub.
