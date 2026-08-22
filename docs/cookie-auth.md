@@ -111,3 +111,10 @@ A custom store plugs in with `{"store": "instance", "instance": my_store}`.
   (activity slides it; inactivity kills the session).
 - **No enumeration** — `attempt()` returns a single `False` for unknown user
   and wrong password alike, with a timing-equalizing dummy hash verification.
+
+## Next step: SPAs
+
+Serving a single-page app on these sessions? Enable [SPA
+authentication](spa-auth.md) to add CSRF protection (the
+`/__auth__/csrf-cookie` endpoint plus the double-submit middleware) on top of
+this cookie flow.

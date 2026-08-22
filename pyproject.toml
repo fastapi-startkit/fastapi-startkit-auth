@@ -53,6 +53,9 @@ Changelog = "https://github.com/fastapi-startkit/fastapi-startkit-auth/releases"
 
 [project.optional-dependencies]
 masoniteorm = ["masonite-orm>=2.18"]
+# The framework itself only supports Python >=3.12; on older interpreters the
+# extra resolves to nothing and the package stays standalone.
+startkit = ["fastapi-startkit>=0.51; python_version >= '3.12'"]
 test = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
@@ -70,6 +73,16 @@ dev = [
     "httpx>=0.27",
     "ruff>=0.9.0",
     "twine>=6.0.0",
+]
+
+[tool.uv]
+# masonite-orm pins cleo<2.0 while fastapi-startkit needs cleo>=2.1: the two
+# extras are mutually exclusive and cannot be locked together.
+conflicts = [
+    [
+        { extra = "masoniteorm" },
+        { extra = "startkit" },
+    ],
 ]
 
 [tool.ruff]

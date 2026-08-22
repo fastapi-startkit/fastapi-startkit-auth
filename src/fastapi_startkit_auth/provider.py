@@ -7,8 +7,10 @@ from fastapi.responses import JSONResponse
 
 from .exceptions import AuthError
 from .manager import AuthManager
+from .middleware.csrf import CsrfMiddleware
 from .middleware.session import SessionMiddleware
 from .routes import build_router
+from .routes_spa import build_spa_router
 
 
 async def _auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:
@@ -37,6 +39,23 @@ class AuthProvider:
         app.add_exception_handler(AuthError, _auth_error_handler)
         if self.manager.has_session_guard():
             session = self.manager.session_config
+            if self.manager.spa_enabled():
+                spa = self.manager.spa_config
+                app.include_router(build_spa_router(prefix=self.prefix))
+                # Added before SessionMiddleware so it ends up inside it and
+                # sees the loaded session on the request state.
+                app.add_middleware(
+                    CsrfMiddleware,
+                    cookie=spa["csrf_cookie"],
+                    header=spa["csrf_header"],
+                    exempt_paths=spa["csrf_exempt_paths"],
+                    stateful_origins=spa["stateful_origins"],
+                    ttl=session["ttl"],
+                    same_site=session["same_site"],
+                    secure=session["secure"],
+                    domain=session["domain"],
+                    path=session["path"],
+                )
             app.add_middleware(
                 SessionMiddleware,
                 store=self.manager.session_store,

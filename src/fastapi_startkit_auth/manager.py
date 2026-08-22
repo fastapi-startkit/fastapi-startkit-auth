@@ -67,6 +67,7 @@ class AuthManager:
         self.debug_expose_reset_token = bool(cfg.get("debug_expose_reset_token", False))
 
         self.session_config = {**AuthConfig.session, **cfg.get("session", {})}
+        self.spa_config = {**AuthConfig.spa, **cfg.get("spa", {})}
         self._session_store: SessionStore | None = None
 
         self._providers: dict[str, UserProvider] = {
@@ -111,8 +112,9 @@ class AuthManager:
         """Register a factory that builds a guard for a config ``driver`` key.
 
         Guards are constructed by their ``spec["driver"]`` rather than hardcoded,
-        so future modes (``session``, ``token``) register alongside the built-in
-        ``passport`` driver without touching the resolution logic.
+        so new modes — the future ``token`` driver, or app-defined ones —
+        register alongside the built-in ``passport`` and ``session`` drivers
+        without touching the resolution logic.
 
         Ordering: config-declared guards are built during ``__init__`` right after
         the ``passport`` driver registers, so calling this post-construction does
@@ -180,8 +182,18 @@ class AuthManager:
             return spec["instance"]
         raise ValueError(f"Unknown session store: {kind!r}")
 
+    def session_guard_name(self) -> str | None:
+        """Name of the first configured session guard, or ``None``."""
+        return next(
+            (name for name, guard in self._guards.items() if isinstance(guard, SessionGuard)),
+            None,
+        )
+
     def has_session_guard(self) -> bool:
-        return any(isinstance(guard, SessionGuard) for guard in self._guards.values())
+        return self.session_guard_name() is not None
+
+    def spa_enabled(self) -> bool:
+        return bool(self.spa_config.get("enabled"))
 
     def _build_broker(self, spec: dict[str, Any]) -> PasswordBroker:
         provider = self._resolve_broker_provider(spec.get("provider"))

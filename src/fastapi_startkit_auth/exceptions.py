@@ -69,6 +69,13 @@ class InvalidSession(AuthError):
     status_code = 401
 
 
+class CsrfTokenMismatch(AuthError):
+    """The request is missing a valid CSRF token for this session."""
+
+    error = "csrf_token_mismatch"
+    status_code = 403
+
+
 class InsufficientScope(AuthError):
     """The token does not carry the scopes required for this resource."""
 
