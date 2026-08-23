@@ -179,3 +179,24 @@ def test_session_purge_interval_is_configurable_via_auth_config():
 
     store = AuthManager(Config).session_store
     assert store._purge_interval == 7
+
+
+def test_session_store_accepts_a_raw_connection():
+    """A raw connection is itself callable; the store must not misfire the
+    factory branch and call it (regression for the callable() detection)."""
+    from fastapi_startkit_auth import AuthConfig
+    from fastapi_startkit_auth.manager import AuthManager
+
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+
+    class Config(AuthConfig):
+        key = "session-store-tests-secret-32-bytes!!!!"
+        default = {"guard": "web", "passwords": "users"}
+        guards = {"web": {"driver": "session", "provider": "users"}}
+        providers = {"users": {"driver": "memory", "users": []}}
+        session = {"store": "sql", "connection": conn}
+
+    store = AuthManager(Config).session_store
+    assert isinstance(store, SqlSessionStore)
+    created = store.create(user_id=1, guard="web", ttl=3600)
+    assert store.find(created.id) is not None

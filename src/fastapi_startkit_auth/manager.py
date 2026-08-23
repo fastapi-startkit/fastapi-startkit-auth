@@ -31,6 +31,21 @@ from .tokens.service import TokenService
 GuardFactory = Callable[[str, dict[str, Any]], Guard]
 
 
+def _resolve_connection(connection: Any) -> Any:
+    """Return an open DB-API connection from either a connection or a factory.
+
+    A raw connection (e.g. ``sqlite3.Connection``) is itself callable, so we
+    duck-type on ``execute`` — which every SQL store relies on — instead of
+    ``callable()`` to tell an already-open connection apart from a zero-arg
+    factory that produces one.
+    """
+    if hasattr(connection, "execute"):
+        return connection
+    if callable(connection):
+        return connection()
+    return connection
+
+
 class AuthManager:
     """Central registry built from an :class:`AuthConfig`.
 
@@ -191,8 +206,7 @@ class AuthManager:
             connection = spec.get("connection")
             if connection is None:
                 raise ValueError('AuthConfig.api_tokens with store "sql" requires a "connection".')
-            if callable(connection):
-                connection = connection()
+            connection = _resolve_connection(connection)
             return SqlApiTokenRepository(
                 connection,
                 table=spec.get("table", "personal_api_tokens"),
@@ -222,8 +236,7 @@ class AuthManager:
             connection = spec.get("connection")
             if connection is None:
                 raise ValueError('AuthConfig.session with store "sql" requires a "connection".')
-            if callable(connection):
-                connection = connection()
+            connection = _resolve_connection(connection)
             return SqlSessionStore(
                 connection,
                 table=spec.get("table", "sessions"),

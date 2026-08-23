@@ -467,6 +467,21 @@ def test_sql_store_requires_a_connection():
         AuthManager(token_config(api_tokens={"store": "sql"})).api_tokens
 
 
+def test_sql_store_accepts_a_raw_connection():
+    """A raw connection is itself callable; the store must not misfire the
+    factory branch and call it (regression for the callable() detection)."""
+    from fastapi_startkit_auth.manager import AuthManager
+
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    manager = AuthManager(
+        token_config(api_tokens={"store": "sql", "connection": conn})
+    )
+    repo = manager.api_tokens.repository
+    assert isinstance(repo, SqlApiTokenRepository)
+    issued = manager.api_tokens.create(user_id=1, name="cli")
+    assert manager.api_tokens.repository.find(issued.record.id) is not None
+
+
 def test_instance_store_is_used_verbatim():
     from fastapi_startkit_auth.manager import AuthManager
 
