@@ -86,3 +86,8 @@ def require_scopes(*scopes: str, mode: str = "all") -> Callable[..., AuthContext
         return context
 
     return dependency
+
+
+# Sanctum-flavored name for the same check: API-token abilities live in
+# ``AuthContext.scopes``, so scope and ability enforcement are one mechanism.
+require_abilities = require_scopes

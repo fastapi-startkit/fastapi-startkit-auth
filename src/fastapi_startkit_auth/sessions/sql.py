@@ -53,9 +53,13 @@ class SqlSessionStore:
         """Drop expired rows periodically so the table stays bounded without a
         scheduler (mirrors ``TokenService``'s purge-on-issue)."""
         now = time.time()
-        if now - self._last_purge >= self._purge_interval:
+        # Check-and-update under the lock so concurrent creates cannot both
+        # claim the same purge window and sweep twice.
+        with self._lock:
+            if now - self._last_purge < self._purge_interval:
+                return
             self._last_purge = now
-            self.purge_expired()
+        self.purge_expired()
 
     def create(self, *, user_id: Any, guard: str, ttl: float | None) -> SessionRecord:
         self._maybe_purge()

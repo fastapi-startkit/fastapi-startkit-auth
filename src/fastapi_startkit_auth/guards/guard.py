@@ -37,10 +37,11 @@ class Guard(Protocol):
     """Structural contract every auth guard driver satisfies.
 
     A guard pairs a named user provider with a mechanism for turning a request
-    credential into an :class:`AuthContext`. ``PassportGuard`` is the only driver
-    today; future ``session`` and ``token`` drivers register their own factories
-    with :class:`~fastapi_startkit_auth.manager.AuthManager` and implement this
-    same surface.
+    credential into an :class:`AuthContext`. ``PassportGuard`` (JWT bearer),
+    ``SessionGuard`` (cookie), and ``TokenGuard`` (opaque API token) are the
+    built-in drivers; app-defined drivers register their own factories with
+    :class:`~fastapi_startkit_auth.manager.AuthManager` and implement this same
+    surface.
     """
 
     name: str

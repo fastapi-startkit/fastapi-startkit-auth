@@ -27,6 +27,8 @@ def build_spa_router(prefix: str = "") -> APIRouter:
             )
             setattr(request.state, SESSION_KEY, record)
             setattr(request.state, FORGET_KEY, False)
-        return Response(status_code=204)
+        # no-store: the response's only payload is Set-Cookie material; caching
+        # it would hand a shared cache a session bootstrap.
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     return router

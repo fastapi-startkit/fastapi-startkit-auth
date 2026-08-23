@@ -160,3 +160,22 @@ def test_sql_purge_on_create_respects_the_interval():
     # Within the interval nothing is swept: the expired row is still on disk
     # (dead only to find()).
     assert _sql_row_count(store) == 2
+
+
+def test_session_purge_interval_is_configurable_via_auth_config():
+    from fastapi_startkit_auth import AuthConfig
+    from fastapi_startkit_auth.manager import AuthManager
+
+    class Config(AuthConfig):
+        key = "session-store-tests-secret-32-bytes!!!!"
+        default = {"guard": "web", "passwords": "users"}
+        guards = {"web": {"driver": "session", "provider": "users"}}
+        providers = {"users": {"driver": "memory", "users": []}}
+        session = {
+            "store": "sql",
+            "connection": lambda: sqlite3.connect(":memory:", check_same_thread=False),
+            "purge_interval": 7,
+        }
+
+    store = AuthManager(Config).session_store
+    assert store._purge_interval == 7

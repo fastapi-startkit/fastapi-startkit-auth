@@ -128,6 +128,11 @@ def test_csrf_cookie_endpoint_sets_both_cookies(client):
     assert client.cookies.get(CSRF_COOKIE)
 
 
+def test_csrf_cookie_endpoint_is_never_cached(client):
+    response = client.get("/__auth__/csrf-cookie")
+    assert response.headers.get("cache-control") == "no-store"
+
+
 def test_csrf_cookie_endpoint_reuses_the_live_session(client):
     client.get("/__auth__/csrf-cookie")
     session_id = client.cookies.get(SESSION_COOKIE)
