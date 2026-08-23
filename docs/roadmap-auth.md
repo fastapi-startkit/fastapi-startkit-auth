@@ -7,10 +7,10 @@ three modes. It is a design/planning artifact — no feature code lands with it.
 
 | Phase | Feature | Depends on | Status |
 | --- | --- | --- | --- |
-| 0 | Guard-driver groundwork (refactor, no behavior change) | — | planned |
-| 1 | Cookie-based (session) authentication | Phase 0 | planned |
-| 2 | SPA authentication (CSRF cookie + protection) | Phase 1 | planned |
-| 3 | Token-based (API token) authentication | Phase 0 only | planned |
+| 0 | Guard-driver groundwork (refactor, no behavior change) | — | shipped |
+| 1 | Cookie-based (session) authentication | Phase 0 | shipped |
+| 2 | SPA authentication (CSRF cookie + protection) | Phase 1 | shipped |
+| 3 | Token-based (API token) authentication | Phase 0 only | shipped |
 
 **Sequencing rationale.** Cookie/session auth is the foundation: the SPA mode
 *is* cookie auth plus CSRF and CORS ergonomics, so Phase 2 strictly follows

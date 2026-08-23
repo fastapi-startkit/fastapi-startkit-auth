@@ -4,6 +4,9 @@ import secrets
 import warnings
 from typing import Any, Callable
 
+from .apitokens.manager import ApiTokenManager
+from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
+from .apitokens.sql import SqlApiTokenRepository
 from .clients.repository import InMemoryClientRepository
 from .config import AuthConfig, as_config_class
 from .grants.authorization_code import AuthorizationCodeGrant
@@ -12,6 +15,7 @@ from .grants.password import PasswordGrant
 from .grants.refresh import RefreshTokenGrant
 from .guards.guard import Guard, PassportGuard
 from .guards.session import SessionGuard
+from .guards.token import TokenGuard
 from .passwords.broker import PasswordBroker
 from .passwords.repository import InMemoryPasswordResetRepository
 from .providers.base import UserProvider
@@ -68,7 +72,9 @@ class AuthManager:
 
         self.session_config = {**AuthConfig.session, **cfg.get("session", {})}
         self.spa_config = {**AuthConfig.spa, **cfg.get("spa", {})}
+        self.api_tokens_config = {**AuthConfig.api_tokens, **cfg.get("api_tokens", {})}
         self._session_store: SessionStore | None = None
+        self._api_tokens: ApiTokenManager | None = None
 
         self._providers: dict[str, UserProvider] = {
             name: self._build_provider(spec) for name, spec in cfg.get("providers", {}).items()
@@ -76,6 +82,7 @@ class AuthManager:
         self._guard_drivers: dict[str, GuardFactory] = {}
         self.register_guard_driver("passport", self._build_passport_guard)
         self.register_guard_driver("session", self._build_session_guard)
+        self.register_guard_driver("token", self._build_token_guard)
         self._guards: dict[str, Guard] = {
             name: self._build_guard(name, spec) for name, spec in cfg.get("guards", {}).items()
         }
@@ -150,6 +157,50 @@ class AuthManager:
             ttl=self.session_config.get("ttl"),
         )
 
+    def _build_token_guard(self, name: str, spec: dict[str, Any]) -> Guard:
+        provider = self._require_provider(spec.get("provider"))
+        return TokenGuard(
+            name=name,
+            tokens=self.api_tokens,
+            provider=provider,
+            header=self.api_tokens_config.get("header", "Authorization"),
+        )
+
+    @property
+    def api_tokens(self) -> ApiTokenManager:
+        """The API-token manager, built on first use.
+
+        Lazy for the same reason as :attr:`session_store`: apps without a token
+        guard never pay for (or have to configure) the repository — notably the
+        SQL connection.
+        """
+        if self._api_tokens is None:
+            self._api_tokens = ApiTokenManager(
+                repository=self._build_api_token_repository(),
+                default_ttl=self.api_tokens_config.get("ttl"),
+                purge_interval=self.api_tokens_config.get("purge_interval", 300),
+            )
+        return self._api_tokens
+
+    def _build_api_token_repository(self) -> ApiTokenRepository:
+        spec = self.api_tokens_config
+        kind = spec.get("store", "memory")
+        if kind == "memory":
+            return InMemoryApiTokenRepository()
+        if kind == "sql":
+            connection = spec.get("connection")
+            if connection is None:
+                raise ValueError('AuthConfig.api_tokens with store "sql" requires a "connection".')
+            if callable(connection):
+                connection = connection()
+            return SqlApiTokenRepository(
+                connection,
+                table=spec.get("table", "personal_api_tokens"),
+            )
+        if kind == "instance":
+            return spec["instance"]
+        raise ValueError(f"Unknown api_tokens store: {kind!r}")
+
     @property
     def session_store(self) -> SessionStore:
         """The configured session store, built on first use.
@@ -177,6 +228,7 @@ class AuthManager:
                 connection,
                 table=spec.get("table", "sessions"),
                 idle_ttl=idle_ttl,
+                purge_interval=spec.get("purge_interval", 300),
             )
         if kind == "instance":
             return spec["instance"]

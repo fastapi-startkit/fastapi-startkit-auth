@@ -32,6 +32,8 @@ class AuthConfig:
     # DB-API ``connection`` — or zero-arg factory — plus optional ``table``),
     # or "instance" (a ready-made SessionStore under ``instance``). Overrides
     # are merged over these defaults, so partial dicts are fine.
+    # ``purge_interval`` throttles the SQL store's opportunistic purge-on-create
+    # (seconds between sweeps of expired rows).
     session: dict[str, Any] = {
         "store": "memory",
         "cookie": "startkit_session",
@@ -42,6 +44,7 @@ class AuthConfig:
         "secure": True,
         "domain": None,
         "path": "/",
+        "purge_interval": 300,
     }
 
     # --- SPA settings (CSRF protection on top of session guards) -------
@@ -56,6 +59,21 @@ class AuthConfig:
         "csrf_header": "X-XSRF-TOKEN",
         "csrf_exempt_paths": [],
         "stateful_origins": [],
+    }
+
+    # --- API token settings (opaque tokens; used by {"driver": "token"} guards) --
+    # ``store`` selects the backend like the session block: "memory" (default),
+    # "sql" (requires a DB-API ``connection`` — or zero-arg factory — plus
+    # optional ``table``), or "instance" (a ready-made ApiTokenRepository under
+    # ``instance``). ``header`` is where the guard reads the token: the default
+    # "Authorization" expects a ``Bearer`` scheme, any other name is read raw.
+    # ``ttl`` is the default token lifetime in seconds (None = non-expiring);
+    # ``purge_interval`` throttles the opportunistic purge-on-issue.
+    api_tokens: dict[str, Any] = {
+        "store": "memory",
+        "header": "Authorization",
+        "ttl": None,
+        "purge_interval": 300,
     }
 
     # --- JWT / token settings (overridable) ----------------------------

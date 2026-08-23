@@ -33,6 +33,13 @@ Enabling it registers two things:
 - `GET /__auth__/csrf-cookie` — the SPA bootstrap endpoint;
 - the CSRF middleware, which enforces the token on unsafe methods.
 
+!!! note "Rate-limit the bootstrap endpoint"
+    Every anonymous hit on `/__auth__/csrf-cookie` can create a guest session
+    record, so an unthrottled scraper can grow your session store. The
+    response is sent with `Cache-Control: no-store` (it is per-client cookie
+    material); put your rate limiter in front of it like any other
+    unauthenticated endpoint.
+
 Without `spa["enabled"]`, cookie auth behaves exactly as in Phase 1 — no CSRF
 endpoint, no enforcement.
 
@@ -77,6 +84,20 @@ What happens under the hood:
 When `stateful_origins` is configured, unsafe session-authenticated requests
 that carry an `Origin` header from outside the list are rejected before the
 token is even checked — defense in depth against cross-origin abuse.
+
+!!! warning "Exempt prefixes match more than you might expect"
+    A trailing `*` is a plain prefix match: `"/webhook*"` exempts `/webhook`
+    **and** `/webhook-evil` and `/webhooks/anything`. To exempt only a
+    subtree, end the prefix at a path boundary — `"/webhook/*"` — and list
+    the bare path separately (`["/webhook", "/webhook/*"]`) if you need both.
+
+!!! warning "Origin check runs before exemptions"
+    `stateful_origins` is enforced **before** `csrf_exempt_paths`: a
+    session-carrying unsafe request from a foreign `Origin` is rejected even
+    on an exempt path. Third-party webhook callers are typically fine — they
+    send no session cookie and no `Origin` header — but if an exempt path
+    must accept browser calls from another origin, that origin has to be in
+    `stateful_origins` too.
 
 ## Configuration
 

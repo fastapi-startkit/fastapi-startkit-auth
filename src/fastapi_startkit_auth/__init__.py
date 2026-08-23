@@ -23,6 +23,7 @@ _EXPORTS = {
     "current_user": ("fastapi_startkit_auth.dependencies", "current_user"),
     "optional_user": ("fastapi_startkit_auth.dependencies", "optional_user"),
     "require_scopes": ("fastapi_startkit_auth.dependencies", "require_scopes"),
+    "require_abilities": ("fastapi_startkit_auth.dependencies", "require_abilities"),
     "AuthError": ("fastapi_startkit_auth.exceptions", "AuthError"),
     "InvalidGrant": ("fastapi_startkit_auth.exceptions", "InvalidGrant"),
     "InvalidClient": ("fastapi_startkit_auth.exceptions", "InvalidClient"),
@@ -39,6 +40,16 @@ _EXPORTS = {
     "SessionStore": ("fastapi_startkit_auth.sessions.store", "SessionStore"),
     "InMemorySessionStore": ("fastapi_startkit_auth.sessions.store", "InMemorySessionStore"),
     "SqlSessionStore": ("fastapi_startkit_auth.sessions.sql", "SqlSessionStore"),
+    "TokenGuard": ("fastapi_startkit_auth.guards.token", "TokenGuard"),
+    "ApiTokenManager": ("fastapi_startkit_auth.apitokens.manager", "ApiTokenManager"),
+    "NewApiToken": ("fastapi_startkit_auth.apitokens.manager", "NewApiToken"),
+    "ApiTokenRecord": ("fastapi_startkit_auth.apitokens.models", "ApiTokenRecord"),
+    "ApiTokenRepository": ("fastapi_startkit_auth.apitokens.repository", "ApiTokenRepository"),
+    "InMemoryApiTokenRepository": (
+        "fastapi_startkit_auth.apitokens.repository",
+        "InMemoryApiTokenRepository",
+    ),
+    "SqlApiTokenRepository": ("fastapi_startkit_auth.apitokens.sql", "SqlApiTokenRepository"),
 }
 
 __all__ = list(_EXPORTS)

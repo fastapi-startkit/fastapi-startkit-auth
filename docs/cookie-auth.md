@@ -72,6 +72,7 @@ class Config(AuthConfig):
         "secure": True,               # opt out for local dev only (warns)
         "domain": None,
         "path": "/",
+        "purge_interval": 300,        # seconds between SQL purge-on-create sweeps
     }
 ```
 

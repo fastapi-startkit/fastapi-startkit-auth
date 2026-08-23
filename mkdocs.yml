@@ -40,6 +40,7 @@ nav:
   - Grants: grants.md
   - Cookie authentication: cookie-auth.md
   - SPA authentication: spa-auth.md
+  - API token authentication: api-token.md
   - Scopes & abilities: scopes.md
   - Password resets: password-resets.md
   - Auth roadmap: roadmap-auth.md
