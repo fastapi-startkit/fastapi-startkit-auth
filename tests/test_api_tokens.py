@@ -184,6 +184,17 @@ def test_sql_store_never_sees_the_plaintext():
             assert secret not in str(column)
 
 
+def test_repr_never_leaks_the_secret(tokens):
+    issued = tokens.create(user_id=1, name="cli")
+    secret = issued.plain_text.partition("|")[2]
+    rendered = repr(issued)
+    assert secret not in rendered
+    assert issued.plain_text not in rendered
+    # Still useful for debugging: the public id half stays visible.
+    assert issued.record.id in rendered
+    assert "***redacted***" in rendered
+
+
 def test_verify_returns_the_record_and_touches_it(tokens):
     issued = tokens.create(user_id=1, abilities=["posts:read"])
     record = tokens.verify(issued.plain_text)

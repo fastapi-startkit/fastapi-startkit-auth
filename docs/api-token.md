@@ -158,8 +158,9 @@ Both stay; pick by need:
 ## Security properties
 
 - **Hash at rest** — only `sha256(secret)` is stored. SHA-256 (not bcrypt) is
-  the right tool here: the secret is 240 bits of randomness, so key
-  stretching adds per-request latency without adding security.
+  the right tool here: the secret is 320 bits of randomness
+  (`secrets.token_urlsafe(40)`), so key stretching adds per-request latency
+  without adding security.
 - **Shown once** — the plaintext exists only in the `NewApiToken` returned by
   `create()`; it is never persisted, logged, or reconstructable.
 - **Constant-time verification** — lookup is by id (no scan), then one

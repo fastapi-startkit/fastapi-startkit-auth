@@ -119,9 +119,9 @@ class AuthManager:
         """Register a factory that builds a guard for a config ``driver`` key.
 
         Guards are constructed by their ``spec["driver"]`` rather than hardcoded,
-        so new modes — the future ``token`` driver, or app-defined ones —
-        register alongside the built-in ``passport`` and ``session`` drivers
-        without touching the resolution logic.
+        so app-defined drivers register alongside the built-in ``passport``,
+        ``session``, and ``token`` drivers without touching the resolution
+        logic.
 
         Ordering: config-declared guards are built during ``__init__`` right after
         the ``passport`` driver registers, so calling this post-construction does

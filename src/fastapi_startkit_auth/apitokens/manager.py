@@ -17,7 +17,7 @@ _GENERIC_FAILURE = "The API token is invalid."
 _DUMMY_HASH = hash_token_secret("!" + generate_token_secret())
 
 
-@dataclass
+@dataclass(repr=False)
 class NewApiToken:
     """The one and only carrier of a token's plaintext.
 
@@ -27,6 +27,13 @@ class NewApiToken:
 
     record: ApiTokenRecord
     plain_text: str
+
+    def __repr__(self) -> str:
+        # The dataclass auto-repr would leak the live secret into logs,
+        # error-tracker locals, and test output; show only the id half.
+        return (
+            f"NewApiToken(record={self.record!r}, plain_text='{self.record.id}|***redacted***')"
+        )
 
 
 class ApiTokenManager:
