@@ -23,6 +23,7 @@ What it demonstrates:
 ```
 example/sessions/
 ├── app.py                        # FastAPI app: auth config + routes
+├── requirements.txt              # Backend dependencies
 ├── package.json                  # Frontend dependencies and scripts
 ├── vite.config.ts                # Vite build (manifest for asset versioning)
 ├── tsconfig.json
@@ -44,8 +45,8 @@ Requires Python 3.10+ and Node 20+.
 cd example/sessions
 
 # 1. Backend dependencies
-uv venv && uv pip install fastapi-startkit fastapi-startkit-auth uvicorn
-# (or: pip install fastapi-startkit fastapi-startkit-auth uvicorn)
+uv venv && uv pip install -r requirements.txt
+# (or: pip install -r requirements.txt)
 
 # 2. Frontend dependencies + production asset build
 npm install
@@ -81,7 +82,7 @@ npm run types:check
 | Route            | Behaviour                                                                                                                              |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /login`     | Renders the `Login` page. Already authenticated → `303` redirect to `/dashboard`.                                                       |
-| `POST /login`    | Body `{email, password}`. Success → session created, cookie set, `303` to `/dashboard`. Failure → back to `/login` with `errors.email`. |
+| `POST /login`    | Body `{email, password}`. Success → session created, cookie set, `303` to `/dashboard`. Failure → direct Inertia render of `Login` with `errors.email` (a failed login has no session to flash errors into). |
 | `GET /dashboard` | Renders `Dashboard` with `{user: {id, email}}`. No valid session → `303` to `/login`.                                                   |
 | `POST /logout`   | Destroys the session server-side, expires the cookie, `303` to `/login`.                                                                |
 
@@ -92,8 +93,10 @@ Notes:
   you — keep `secure` on in production).
 - POST responses redirect with `303 See Other` so Inertia follows up with a
   `GET`, per the Inertia protocol.
-- If the CSRF middleware is enabled, its defaults (`XSRF-TOKEN` cookie,
-  `X-XSRF-TOKEN` header) match axios's built-in echo behaviour, so Inertia
-  requests pass CSRF checks with no extra frontend code.
+- CSRF protection is on via the package's SPA mode (`CsrfMiddleware`).
+  Enforcement is session-bound: the guest `POST /login` is exempt (no session
+  yet), while `POST /logout` requires the `X-XSRF-TOKEN` header — which axios
+  (Inertia's transport) echoes automatically from the `XSRF-TOKEN` cookie, so
+  no extra frontend code is needed.
 - Sessions live in memory: restarting the server signs everyone out. Swap in
   `SqlSessionStore` for persistence.
