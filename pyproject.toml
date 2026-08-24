@@ -1,7 +1,7 @@
 [project]
 name = "fastapi-startkit-auth"
-version = "0.1.0"
-description = "Passport-style OAuth2 + JWT authentication package for FastAPI (guards, providers, grants, scopes, personal access tokens, password resets)."
+version = "0.2.0"
+description = "Laravel-style authentication for FastAPI: OAuth2/JWT authorization server, cookie/session guard, SPA + CSRF protection, and Sanctum-style API tokens."
 readme = "readme.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -11,10 +11,15 @@ keywords = [
     "jwt",
     "auth",
     "passport",
+    "sanctum",
     "authentication",
     "authorization",
     "security",
     "tokens",
+    "session",
+    "cookie",
+    "csrf",
+    "spa",
     "starter-kit",
 ]
 authors = [
