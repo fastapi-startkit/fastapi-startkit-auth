@@ -103,8 +103,9 @@ npm run types:check
 Notes:
 
 - The session cookie is HttpOnly + SameSite=Lax; the example runs over plain
-  HTTP so `secure` is disabled in the session config (a `UserWarning` reminds
-  you — keep `secure` on in production).
+  HTTP so `secure` is disabled in the session config. **Expect a `UserWarning`
+  about `secure` at startup — it is intentional here.** Keep `secure` on in
+  production.
 - POST responses redirect with `303 See Other` so Inertia follows up with a
   `GET`, per the Inertia protocol.
 - CSRF protection is on via the package's SPA mode (`CsrfMiddleware`).
@@ -114,3 +115,6 @@ Notes:
   no extra frontend code is needed.
 - Sessions live in memory: restarting the server signs everyone out. Swap in
   `SqlSessionStore` for persistence.
+- Troubleshooting: if pages hang loading assets, check for a stale
+  `public/hot` file (left behind if a dev server crashed) and delete it — while
+  it exists the backend emits dev-server asset URLs instead of built ones.
