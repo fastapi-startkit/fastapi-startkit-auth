@@ -1,4 +1,9 @@
-"""Session-based login example: FastAPI + fastapi-startkit-auth + Inertia.js.
+"""Session-based login example: fastapi-startkit + fastapi-startkit-auth + Inertia.js.
+
+Canonical fastapi-startkit bootstrap: the Application composes providers —
+FastAPIProvider creates the FastAPI instance, ViteProvider/InertiaProvider wire
+the frontend integration, and two app-local providers install this package's
+session-auth stack and the web routes.
 
 Run from this directory (see README.md for the full setup):
 
@@ -10,11 +15,14 @@ from fastapi import Depends
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 
-from fastapi_startkit.application import Application
+from fastapi_startkit import Application
+from fastapi_startkit.fastapi import FastAPIConfig, FastAPIProvider, Router
 from fastapi_startkit.inertia import Inertia, InertiaProvider
+from fastapi_startkit.support import Provider
 from fastapi_startkit.vite import ViteProvider
 
-from fastapi_startkit_auth import Auth, AuthConfig, AuthProvider
+from fastapi_startkit_auth import Auth, AuthConfig
+from fastapi_startkit_auth import AuthProvider as AuthPackageProvider
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 
@@ -49,9 +57,77 @@ class ExampleAuthConfig(AuthConfig):
     spa = {"enabled": True}
 
 
-application = Application(
+class AuthStackProvider(Provider):
+    """Adapts this package's plain-FastAPI AuthProvider to the framework.
+
+    Booted after FastAPIProvider has created the FastAPI instance, so the
+    session/CSRF middleware ends up outside InertiaMiddleware (middleware
+    added later wraps middleware added earlier).
+    """
+
+    provider_key = "auth"
+
+    def boot(self) -> None:
+        AuthPackageProvider(ExampleAuthConfig).register(self.app.fastapi)
+
+
+# --- controllers ------------------------------------------------------
+
+
+def public_user(user: dict) -> dict:
+    return {"id": user["id"], "email": user["email"]}
+
+
+def home(auth: Auth = Depends(Auth.scoped)) -> Response:
+    return RedirectResponse("/dashboard" if auth.check() else "/login", status_code=303)
+
+
+def login_page(auth: Auth = Depends(Auth.scoped)) -> Response:
+    if auth.check():
+        return RedirectResponse("/dashboard", status_code=303)
+    return Inertia.render("Login")
+
+
+def attempt_login(credentials: LoginCredentials, auth: Auth = Depends(Auth.scoped)) -> Response:
+    if auth.attempt(credentials.model_dump()):
+        return RedirectResponse("/dashboard", status_code=303)
+    # A failed login has no session to flash errors into, so render the page
+    # directly; Inertia's useForm reads page.props.errors either way.
+    return Inertia.render("Login", {"errors": {"email": LOGIN_ERROR}})
+
+
+def dashboard(auth: Auth = Depends(Auth.scoped)) -> Response:
+    user = auth.user()
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    return Inertia.render("Dashboard", {"user": public_user(user)})
+
+
+def logout(auth: Auth = Depends(Auth.scoped)) -> Response:
+    auth.logout()
+    return RedirectResponse("/login", status_code=303)
+
+
+class WebRoutesProvider(Provider):
+    provider_key = "web"
+
+    def boot(self) -> None:
+        router = Router()
+        router.get("/", home)
+        router.get("/login", login_page, name="login")
+        router.post("/login", attempt_login, name="login.attempt")
+        router.get("/dashboard", dashboard, name="dashboard")
+        router.post("/logout", logout, name="logout")
+        # Include the wrapped APIRouter: FastAPI's lazy router inclusion
+        # resolves routes off the concrete APIRouter type, and the startkit
+        # Router only proxies attribute access to it.
+        self.app.include_router(router.router)
+
+
+app = Application(
     base_path=BASE_PATH,
     providers=[
+        (FastAPIProvider, FastAPIConfig),
         (
             ViteProvider,
             {
@@ -60,56 +136,8 @@ application = Application(
                 "manifest_filename": ".vite/manifest.json",
             },
         ),
+        InertiaProvider,
+        AuthStackProvider,
+        WebRoutesProvider,
     ],
 )
-
-app = application.fastapi
-
-# InertiaProvider is booted after the FastAPI instance exists: the framework's
-# Application.add_middleware needs it, but it is only created lazily, so
-# booting Inertia inside Application(providers=[...]) would fail on a fresh
-# checkout where public/build has not been built yet.
-_inertia = InertiaProvider(application)
-_inertia.register()
-_inertia.boot()
-
-AuthProvider(ExampleAuthConfig).register(app)
-
-
-def public_user(user: dict) -> dict:
-    return {"id": user["id"], "email": user["email"]}
-
-
-@app.get("/", response_model=None)
-def home(auth: Auth = Depends(Auth.scoped)) -> Response:
-    return RedirectResponse("/dashboard" if auth.check() else "/login", status_code=303)
-
-
-@app.get("/login", response_model=None)
-def login_page(auth: Auth = Depends(Auth.scoped)) -> Response:
-    if auth.check():
-        return RedirectResponse("/dashboard", status_code=303)
-    return Inertia.render("Login")
-
-
-@app.post("/login", response_model=None)
-def login(credentials: LoginCredentials, auth: Auth = Depends(Auth.scoped)) -> Response:
-    if auth.attempt(credentials.model_dump()):
-        return RedirectResponse("/dashboard", status_code=303)
-    # A failed login has no session to flash errors into, so render the page
-    # directly; Inertia's useForm reads page.props.errors either way.
-    return Inertia.render("Login", {"errors": {"email": LOGIN_ERROR}})
-
-
-@app.get("/dashboard", response_model=None)
-def dashboard(auth: Auth = Depends(Auth.scoped)) -> Response:
-    user = auth.user()
-    if user is None:
-        return RedirectResponse("/login", status_code=303)
-    return Inertia.render("Dashboard", {"user": public_user(user)})
-
-
-@app.post("/logout", response_model=None)
-def logout(auth: Auth = Depends(Auth.scoped)) -> Response:
-    auth.logout()
-    return RedirectResponse("/login", status_code=303)
