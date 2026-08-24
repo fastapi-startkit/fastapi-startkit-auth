@@ -22,9 +22,15 @@ What it demonstrates:
 
 ```
 example/sessions/
-├── app.py                        # Startkit application: providers + routes
+├── bootstrap/
+│   └── application.py            # Application bootstrap: providers + config
+├── routes/
+│   └── web.py                    # Route declarations (startkit Router)
+├── app/http/controllers/         # auth_controller.py, dashboard_controller.py
+├── config/
+│   └── vite.py                   # Published Vite settings (framework defaults)
 ├── package.json                  # Frontend dependencies and scripts
-├── vite.config.ts                # Vite build (manifest for asset versioning)
+├── vite.config.ts                # fastapi-vite-plugin + Vue + Tailwind
 ├── tsconfig.json
 └── resources/
     ├── templates/index.html      # Inertia root template
@@ -56,6 +62,10 @@ npm run build
 manifest hash doubles as the Inertia asset version, so stale clients are
 hard-reloaded automatically after a rebuild.
 
+Run all commands from `example/sessions/` with the example's own venv —
+deactivate any other active virtualenv first so `uv run` resolves here, and so
+`bootstrap.application:app` imports via the working directory.
+
 ## Run
 
 ```sh
@@ -63,7 +73,9 @@ npm run dev
 ```
 
 This starts backend and frontend together (via `npx concurrently`):
-`uv run uvicorn app:app --reload` plus the Vite dev server for hot reload.
+`uv run uvicorn bootstrap.application:app --factory --reload` plus the Vite
+dev server for hot reload (`--factory` because the startkit `Application` is a
+factory returning the FastAPI ASGI app).
 Each is also available on its own as `npm run dev:backend` /
 `npm run dev:frontend` — for a production-style run, `npm run build` once and
 start only the backend.
@@ -72,7 +84,7 @@ If port 8000 is taken, pick another one — everything else adapts:
 
 ```sh
 BACKEND_PORT=8001 npm run dev
-# or standalone: uv run uvicorn app:app --factory --reload --port 8001
+# or standalone: uv run uvicorn bootstrap.application:app --factory --reload --port 8001
 ```
 
 (HMR is unaffected: `public/hot` carries the Vite dev-server origin, not the
