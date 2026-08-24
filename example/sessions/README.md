@@ -39,7 +39,7 @@ example/sessions/
 
 ## Setup
 
-Requires [uv](https://docs.astral.sh/uv/) (Python 3.10+) and Node 20+.
+Requires [uv](https://docs.astral.sh/uv/) (Python 3.12+) and Node 20+.
 
 ```sh
 cd example/sessions
