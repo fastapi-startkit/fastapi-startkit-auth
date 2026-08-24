@@ -22,8 +22,7 @@ What it demonstrates:
 
 ```
 example/sessions/
-├── app.py                        # FastAPI app: auth config + routes
-├── requirements.txt              # Backend dependencies
+├── app.py                        # Startkit application: providers + routes
 ├── package.json                  # Frontend dependencies and scripts
 ├── vite.config.ts                # Vite build (manifest for asset versioning)
 ├── tsconfig.json
@@ -44,9 +43,9 @@ Requires [uv](https://docs.astral.sh/uv/) (Python 3.12+) and Node 20+.
 ```sh
 cd example/sessions
 
-# 1. Backend dependencies
+# 1. Backend dependencies (this package + the startkit framework extras)
 uv venv
-uv pip install -r requirements.txt
+uv pip install -e ../.. "fastapi-startkit[inertia,vite]>=0.51" uvicorn
 
 # 2. Frontend dependencies + production asset build
 npm install
@@ -73,7 +72,7 @@ If port 8000 is taken, pick another one — everything else adapts:
 
 ```sh
 BACKEND_PORT=8001 npm run dev
-# or standalone: uv run uvicorn app:app --reload --port 8001
+# or standalone: uv run uvicorn app:app --factory --reload --port 8001
 ```
 
 (HMR is unaffected: `public/hot` carries the Vite dev-server origin, not the

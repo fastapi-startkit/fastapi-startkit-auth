@@ -1,6 +1,0 @@
-# Requires Python 3.12+ (the fastapi-startkit framework's floor).
-# The auth package from this repo, plus the framework with the Inertia/Vite
-# integration extras (jinja2 + markupsafe for the root template rendering).
--e ../..
-fastapi-startkit[inertia,vite]>=0.51
-uvicorn>=0.30
