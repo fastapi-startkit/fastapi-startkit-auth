@@ -11,15 +11,26 @@ function submit(): void {
     onFinish: () => form.reset("password"),
   });
 }
+
+const inputClass =
+  "rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-base " +
+  "focus:outline-2 focus:outline-offset-1 focus:outline-indigo-500 dark:border-zinc-600";
 </script>
 
 <template>
-  <main class="page">
-    <form class="card" @submit.prevent="submit">
-      <h1>Sign in</h1>
-      <p class="hint">Demo credentials: <code>demo@example.com</code> / <code>password</code></p>
+  <main
+    class="grid min-h-screen place-items-center bg-zinc-100 p-6 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
+  >
+    <form
+      class="grid w-full max-w-sm gap-4 rounded-xl bg-white p-8 shadow-md dark:bg-zinc-800"
+      @submit.prevent="submit"
+    >
+      <h1 class="text-xl font-semibold">Sign in</h1>
+      <p class="text-sm text-zinc-500 dark:text-zinc-400">
+        Demo credentials: <code>demo@example.com</code> / <code>password</code>
+      </p>
 
-      <label class="field">
+      <label class="grid gap-1 text-sm font-medium">
         <span>Email</span>
         <input
           v-model="form.email"
@@ -28,10 +39,11 @@ function submit(): void {
           autocomplete="username"
           required
           autofocus
+          :class="inputClass"
         />
       </label>
 
-      <label class="field">
+      <label class="grid gap-1 text-sm font-medium">
         <span>Password</span>
         <input
           v-model="form.password"
@@ -39,14 +51,19 @@ function submit(): void {
           name="password"
           autocomplete="current-password"
           required
+          :class="inputClass"
         />
       </label>
 
-      <p v-if="form.errors.email" class="error" role="alert">
+      <p v-if="form.errors.email" class="text-sm text-red-600" role="alert">
         {{ form.errors.email }}
       </p>
 
-      <button type="submit" :disabled="form.processing">
+      <button
+        type="submit"
+        :disabled="form.processing"
+        class="cursor-pointer rounded-lg bg-indigo-500 px-3 py-2 text-base font-semibold text-white hover:bg-indigo-600 disabled:cursor-default disabled:opacity-60"
+      >
         {{ form.processing ? "Signing in…" : "Sign in" }}
       </button>
     </form>
