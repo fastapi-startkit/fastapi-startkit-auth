@@ -3,8 +3,8 @@
 The `fastapi-startkit` framework is an optional extra and is NOT installed in
 this test environment. The publish contract is exercised against a stub that
 mirrors the framework's ``Provider`` surface (``provider_key``, ``publishes``,
-``merge_config_from`` — see docs/notes/package-publish-contract.md); the
-standalone tests assert the package never requires the framework.
+``merge_config_from``); the standalone tests assert the package never
+requires the framework.
 """
 import importlib
 import runpy
