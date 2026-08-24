@@ -39,14 +39,14 @@ example/sessions/
 
 ## Setup
 
-Requires Python 3.10+ and Node 20+.
+Requires [uv](https://docs.astral.sh/uv/) (Python 3.10+) and Node 20+.
 
 ```sh
 cd example/sessions
 
 # 1. Backend dependencies
-uv venv && uv pip install -r requirements.txt
-# (or: pip install -r requirements.txt)
+uv venv
+uv pip install -r requirements.txt
 
 # 2. Frontend dependencies + production asset build
 npm install
@@ -60,7 +60,7 @@ hard-reloaded automatically after a rebuild.
 ## Run
 
 ```sh
-uvicorn app:app --reload
+uv run uvicorn app:app --reload
 ```
 
 Open http://127.0.0.1:8000/login and sign in with the seeded demo user:
