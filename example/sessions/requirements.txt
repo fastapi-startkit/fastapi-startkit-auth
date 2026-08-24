@@ -1,0 +1,5 @@
+# The auth package from this repo, plus the fastapi-startkit framework
+# (Inertia + Vite integration) pulled in via the [startkit] extra.
+-e ../..[startkit]
+fastapi-startkit[inertia,vite]>=0.51
+uvicorn>=0.30
