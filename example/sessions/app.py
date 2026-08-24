@@ -7,7 +7,7 @@ session-auth stack and the web routes.
 
 Run from this directory (see README.md for the full setup):
 
-    uv run uvicorn app:app --reload
+    uv run uvicorn app:app --factory --reload
 """
 from pathlib import Path
 
@@ -128,14 +128,7 @@ app = Application(
     base_path=BASE_PATH,
     providers=[
         (FastAPIProvider, FastAPIConfig),
-        (
-            ViteProvider,
-            {
-                "public_path": str(BASE_PATH / "public"),
-                # Vite 5+ writes the manifest to a .vite/ subdirectory.
-                "manifest_filename": ".vite/manifest.json",
-            },
-        ),
+        (ViteProvider, {"public_path": str(BASE_PATH / "public")}),
         InertiaProvider,
         AuthStackProvider,
         WebRoutesProvider,
