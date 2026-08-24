@@ -69,7 +69,18 @@ Each is also available on its own as `npm run dev:backend` /
 `npm run dev:frontend` — for a production-style run, `npm run build` once and
 start only the backend.
 
-Open http://127.0.0.1:8000/login and sign in with the seeded demo user:
+If port 8000 is taken, pick another one — everything else adapts:
+
+```sh
+BACKEND_PORT=8001 npm run dev
+# or standalone: uv run uvicorn app:app --reload --port 8001
+```
+
+(HMR is unaffected: `public/hot` carries the Vite dev-server origin, not the
+backend's, and Vite's dev CORS allows any localhost port.)
+
+Open http://127.0.0.1:8000/login (or your chosen port) and sign in with the
+seeded demo user:
 
 | Email              | Password   |
 | ------------------ | ---------- |
