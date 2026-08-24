@@ -60,16 +60,20 @@ hard-reloaded automatically after a rebuild.
 ## Run
 
 ```sh
-uv run uvicorn app:app --reload
+npm run dev
 ```
+
+This starts backend and frontend together (via `npx concurrently`):
+`uv run uvicorn app:app --reload` plus the Vite dev server for hot reload.
+Each is also available on its own as `npm run dev:backend` /
+`npm run dev:frontend` — for a production-style run, `npm run build` once and
+start only the backend.
 
 Open http://127.0.0.1:8000/login and sign in with the seeded demo user:
 
 | Email              | Password   |
 | ------------------ | ---------- |
 | `demo@example.com` | `password` |
-
-For frontend development with hot reload, run `npm run dev` alongside uvicorn.
 
 Type-check the frontend with:
 
