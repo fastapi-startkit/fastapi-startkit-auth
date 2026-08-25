@@ -22,12 +22,19 @@ What it demonstrates:
 
 ```
 example/sessions/
+├── artisan                       # Console entrypoint (provider:publish, …)
 ├── bootstrap/
-│   └── application.py            # Application bootstrap: providers + config
+│   └── app.py                    # Application bootstrap: provider composition
 ├── routes/
 │   └── web.py                    # Route declarations (startkit Router)
-├── app/http/controllers/         # auth_controller.py, dashboard_controller.py
+├── app/
+│   ├── http/
+│   │   ├── controllers/          # auth_controller.py, dashboard_controller.py
+│   │   └── requests/
+│   │       └── login_request.py  # LoginRequest schema (JSON body)
+│   └── providers/                # auth_stack_provider.py, route_provider.py
 ├── config/
+│   ├── auth.py                   # ExampleAuthConfig + seeded demo user
 │   └── vite.py                   # Published Vite settings (framework defaults)
 ├── package.json                  # Frontend dependencies and scripts
 ├── vite.config.ts                # fastapi-vite-plugin + Vue + Tailwind
@@ -64,7 +71,7 @@ hard-reloaded automatically after a rebuild.
 
 Run all commands from `example/sessions/` with the example's own venv —
 deactivate any other active virtualenv first so `uv run` resolves here, and so
-`bootstrap.application:app` imports via the working directory.
+`bootstrap.app:app` imports via the working directory.
 
 ## Run
 
@@ -73,7 +80,7 @@ npm run dev
 ```
 
 This starts backend and frontend together (via `npx concurrently`):
-`uv run uvicorn bootstrap.application:app --factory --reload` plus the Vite
+`uv run uvicorn bootstrap.app:app --factory --reload` plus the Vite
 dev server for hot reload (`--factory` because the startkit `Application` is a
 factory returning the FastAPI ASGI app).
 Each is also available on its own as `npm run dev:backend` /
@@ -84,7 +91,7 @@ If port 8000 is taken, pick another one — everything else adapts:
 
 ```sh
 BACKEND_PORT=8001 npm run dev
-# or standalone: uv run uvicorn bootstrap.application:app --factory --reload --port 8001
+# or standalone: uv run uvicorn bootstrap.app:app --factory --reload --port 8001
 ```
 
 (HMR is unaffected: `public/hot` carries the Vite dev-server origin, not the
