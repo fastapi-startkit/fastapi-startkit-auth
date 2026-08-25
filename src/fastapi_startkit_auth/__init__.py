@@ -4,64 +4,84 @@ Public API mirrors the config-driven guard/provider/passwords model of Laravel
 Passport while staying idiomatic FastAPI:
 
     from fastapi_startkit_auth import Application, AuthProvider, AuthConfig
-
-Attributes are resolved lazily so importing a single submodule never forces the
-whole package to load.
 """
 from __future__ import annotations
 
-import importlib
-from typing import Any
+from .apitokens.manager import ApiTokenManager, NewApiToken
+from .apitokens.models import ApiTokenRecord
+from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
+from .apitokens.sql import SqlApiTokenRepository
+from .application import Application
+from .config import AuthConfig
+from .dependencies import (
+    current_user,
+    optional_user,
+    require_abilities,
+    require_scopes,
+)
+from .exceptions import (
+    AuthError,
+    CsrfTokenMismatch,
+    InsufficientScope,
+    InvalidClient,
+    InvalidGrant,
+    InvalidSession,
+    InvalidToken,
+)
+from .facade import Auth
+from .guards.session import SessionGuard
+from .guards.token import TokenGuard
+from .manager import AuthManager
+from .middleware.csrf import CsrfMiddleware
+from .middleware.session import SessionMiddleware
+from .provider import AuthProvider
+from .sessions.models import SessionRecord
+from .sessions.sql import SqlSessionStore
+from .sessions.store import InMemorySessionStore, SessionStore
 
 __version__ = "0.2.0"
 
-_EXPORTS = {
-    "AuthConfig": ("fastapi_startkit_auth.config", "AuthConfig"),
-    "AuthProvider": ("fastapi_startkit_auth.provider", "AuthProvider"),
-    "Application": ("fastapi_startkit_auth.application", "Application"),
-    "AuthManager": ("fastapi_startkit_auth.manager", "AuthManager"),
-    "current_user": ("fastapi_startkit_auth.dependencies", "current_user"),
-    "optional_user": ("fastapi_startkit_auth.dependencies", "optional_user"),
-    "require_scopes": ("fastapi_startkit_auth.dependencies", "require_scopes"),
-    "require_abilities": ("fastapi_startkit_auth.dependencies", "require_abilities"),
-    "AuthError": ("fastapi_startkit_auth.exceptions", "AuthError"),
-    "InvalidGrant": ("fastapi_startkit_auth.exceptions", "InvalidGrant"),
-    "InvalidClient": ("fastapi_startkit_auth.exceptions", "InvalidClient"),
-    "InvalidToken": ("fastapi_startkit_auth.exceptions", "InvalidToken"),
-    "InsufficientScope": ("fastapi_startkit_auth.exceptions", "InsufficientScope"),
-    "InvalidSession": ("fastapi_startkit_auth.exceptions", "InvalidSession"),
-    "CsrfTokenMismatch": ("fastapi_startkit_auth.exceptions", "CsrfTokenMismatch"),
-    "Auth": ("fastapi_startkit_auth.facade", "Auth"),
-    "SessionGuard": ("fastapi_startkit_auth.guards.session", "SessionGuard"),
-    "SessionMiddleware": ("fastapi_startkit_auth.middleware.session", "SessionMiddleware"),
-    "CsrfMiddleware": ("fastapi_startkit_auth.middleware.csrf", "CsrfMiddleware"),
-    "AuthServiceProvider": ("fastapi_startkit_auth.startkit", "AuthServiceProvider"),
-    "SessionRecord": ("fastapi_startkit_auth.sessions.models", "SessionRecord"),
-    "SessionStore": ("fastapi_startkit_auth.sessions.store", "SessionStore"),
-    "InMemorySessionStore": ("fastapi_startkit_auth.sessions.store", "InMemorySessionStore"),
-    "SqlSessionStore": ("fastapi_startkit_auth.sessions.sql", "SqlSessionStore"),
-    "TokenGuard": ("fastapi_startkit_auth.guards.token", "TokenGuard"),
-    "ApiTokenManager": ("fastapi_startkit_auth.apitokens.manager", "ApiTokenManager"),
-    "NewApiToken": ("fastapi_startkit_auth.apitokens.manager", "NewApiToken"),
-    "ApiTokenRecord": ("fastapi_startkit_auth.apitokens.models", "ApiTokenRecord"),
-    "ApiTokenRepository": ("fastapi_startkit_auth.apitokens.repository", "ApiTokenRepository"),
-    "InMemoryApiTokenRepository": (
-        "fastapi_startkit_auth.apitokens.repository",
-        "InMemoryApiTokenRepository",
-    ),
-    "SqlApiTokenRepository": ("fastapi_startkit_auth.apitokens.sql", "SqlApiTokenRepository"),
-}
-
-__all__ = list(_EXPORTS)
+__all__ = (
+    "AuthConfig",
+    "AuthProvider",
+    "Application",
+    "AuthManager",
+    "current_user",
+    "optional_user",
+    "require_scopes",
+    "require_abilities",
+    "AuthError",
+    "InvalidGrant",
+    "InvalidClient",
+    "InvalidToken",
+    "InsufficientScope",
+    "InvalidSession",
+    "CsrfTokenMismatch",
+    "Auth",
+    "SessionGuard",
+    "SessionMiddleware",
+    "CsrfMiddleware",
+    "AuthServiceProvider",
+    "SessionRecord",
+    "SessionStore",
+    "InMemorySessionStore",
+    "SqlSessionStore",
+    "TokenGuard",
+    "ApiTokenManager",
+    "NewApiToken",
+    "ApiTokenRecord",
+    "ApiTokenRepository",
+    "InMemoryApiTokenRepository",
+    "SqlApiTokenRepository",
+)
 
 
-def __getattr__(name: str) -> Any:
-    try:
-        module_name, attr = _EXPORTS[name]
-    except KeyError:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
-    return getattr(importlib.import_module(module_name), attr)
+def __getattr__(name: str):
+    # AuthServiceProvider subclasses the optional `fastapi-startkit` framework,
+    # which is not a runtime dependency. Resolve it on access so plain-FastAPI
+    # installs import cleanly and only pay for the extra when they use it.
+    if name == "AuthServiceProvider":
+        from .startkit import AuthServiceProvider
 
-
-def __dir__() -> list[str]:
-    return sorted(__all__)
+        return AuthServiceProvider
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
