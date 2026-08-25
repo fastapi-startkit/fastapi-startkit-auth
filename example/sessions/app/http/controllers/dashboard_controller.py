@@ -1,4 +1,3 @@
-"""Dashboard controller: the session-protected page and the root redirect."""
 from fastapi import Depends
 from fastapi.responses import RedirectResponse, Response
 
@@ -7,13 +6,11 @@ from fastapi_startkit.inertia import Inertia
 from fastapi_startkit_auth import Auth
 
 
-def home(auth: Auth = Depends(Auth.scoped)) -> Response:
-    """Send visitors to the dashboard or the login page by auth state."""
+async def home(auth: Auth = Depends(Auth.scoped)) -> Response:
     return RedirectResponse("/dashboard" if auth.check() else "/login", status_code=303)
 
 
-def index(auth: Auth = Depends(Auth.scoped)) -> Response:
-    """Render the protected dashboard; guests are redirected to login."""
+async def index(auth: Auth = Depends(Auth.scoped)) -> Response:
     user = auth.user()
     if user is None:
         return RedirectResponse("/login", status_code=303)

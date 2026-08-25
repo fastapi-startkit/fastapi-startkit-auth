@@ -22,9 +22,9 @@ What it demonstrates:
 
 ```
 example/sessions/
-├── artisan                       # Console entrypoint (provider:publish, …)
+├── artisan                       # Console entrypoint (serve, provider:publish, …)
 ├── bootstrap/
-│   └── app.py                    # Application bootstrap: provider composition
+│   └── application.py            # Application bootstrap: provider composition
 ├── routes/
 │   └── web.py                    # Route declarations (startkit Router)
 ├── app/
@@ -32,9 +32,9 @@ example/sessions/
 │   │   ├── controllers/          # auth_controller.py, dashboard_controller.py
 │   │   └── requests/
 │   │       └── login_request.py  # LoginRequest schema (JSON body)
-│   └── providers/                # auth_stack_provider.py, route_provider.py
+│   └── providers/                # auth_service_provider.py, route_provider.py
 ├── config/
-│   ├── auth.py                   # ExampleAuthConfig + seeded demo user
+│   ├── auth.py                   # AuthConfig + seeded demo user
 │   └── vite.py                   # Published Vite settings (framework defaults)
 ├── package.json                  # Frontend dependencies and scripts
 ├── vite.config.ts                # fastapi-vite-plugin + Vue + Tailwind
@@ -56,9 +56,8 @@ Requires [uv](https://docs.astral.sh/uv/) (Python 3.12+) and Node 20+.
 ```sh
 cd example/sessions
 
-# 1. Backend dependencies (this package + the startkit framework extras)
-uv venv
-uv pip install -e ../.. "fastapi-startkit[inertia,vite]>=0.51" uvicorn
+# 1. Backend dependencies (declared in pyproject.toml)
+uv sync
 
 # 2. Frontend dependencies + production asset build
 npm install
@@ -69,9 +68,9 @@ npm run build
 manifest hash doubles as the Inertia asset version, so stale clients are
 hard-reloaded automatically after a rebuild.
 
-Run all commands from `example/sessions/` with the example's own venv —
-deactivate any other active virtualenv first so `uv run` resolves here, and so
-`bootstrap.app:app` imports via the working directory.
+Run all commands from `example/sessions/` — `uv` resolves the project's own
+`.venv` from `pyproject.toml`, and `bootstrap.application:app` imports via the
+working directory.
 
 ## Run
 
@@ -79,19 +78,15 @@ deactivate any other active virtualenv first so `uv run` resolves here, and so
 npm run dev
 ```
 
-This starts backend and frontend together (via `npx concurrently`):
-`uv run uvicorn bootstrap.app:app --factory --reload` plus the Vite
-dev server for hot reload (`--factory` because the startkit `Application` is a
-factory returning the FastAPI ASGI app).
-Each is also available on its own as `npm run dev:backend` /
-`npm run dev:frontend` — for a production-style run, `npm run build` once and
-start only the backend.
+This starts backend and frontend together (via `concurrently`):
+`uv run python artisan serve` (Uvicorn with `--factory` + auto-reload) plus the
+Vite dev server for hot reload. For a production-style run, `npm run build` once
+and start only the backend.
 
-If port 8000 is taken, pick another one — everything else adapts:
+To use a different port, run the backend directly:
 
 ```sh
-BACKEND_PORT=8001 npm run dev
-# or standalone: uv run uvicorn bootstrap.app:app --factory --reload --port 8001
+uv run python artisan serve --port 8001
 ```
 
 (HMR is unaffected: `public/hot` carries the Vite dev-server origin, not the
