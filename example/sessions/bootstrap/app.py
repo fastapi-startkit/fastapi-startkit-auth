@@ -3,9 +3,8 @@
 Canonical fastapi-startkit bootstrap: the Application composes providers —
 FastAPIProvider creates the FastAPI instance, ViteProvider (configured via the
 published config/vite.py) and InertiaProvider wire the frontend integration,
-and two app-local providers install this package's session-auth stack
-(AuthStackProvider) and the web routes declared in routes/web.py
-(RouteProvider).
+and RouteProvider registers the web routes declared in routes/web.py. The
+session-auth stack is registered directly on the built FastAPI app below.
 
 Run from the example root (example/sessions — see README.md for the full setup):
 
@@ -18,8 +17,10 @@ from fastapi_startkit.fastapi import FastAPIConfig, FastAPIProvider
 from fastapi_startkit.inertia import InertiaProvider
 from fastapi_startkit.vite import ViteProvider
 
-from app.providers.auth_stack_provider import AuthStackProvider
+from fastapi_startkit_auth import AuthProvider as AuthPackageProvider
+
 from app.providers.route_provider import RouteProvider
+from config.auth import ExampleAuthConfig
 
 # The example root: config/, resources/templates and public/ resolve from
 # here, one level above bootstrap/.
@@ -32,7 +33,8 @@ app = Application(
         (FastAPIProvider, FastAPIConfig),
         ViteProvider,
         InertiaProvider,
-        AuthStackProvider,
         RouteProvider,
     ],
 )
+
+AuthPackageProvider(ExampleAuthConfig).register(app.fastapi)
