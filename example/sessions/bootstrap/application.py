@@ -20,7 +20,6 @@ app = Application(
         ViteProvider,
         InertiaProvider,
         RouteProvider,
+        (AuthPackageProvider, AuthConfig),
     ],
 )
-
-AuthPackageProvider(AuthConfig).register(app.fastapi)

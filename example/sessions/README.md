@@ -32,7 +32,7 @@ example/sessions/
 │   │   ├── controllers/          # auth_controller.py, dashboard_controller.py
 │   │   └── requests/
 │   │       └── login_request.py  # LoginRequest schema (JSON body)
-│   └── providers/                # auth_service_provider.py, route_provider.py
+│   └── providers/                # route_provider.py
 ├── config/
 │   ├── auth.py                   # AuthConfig + seeded demo user
 │   └── vite.py                   # Published Vite settings (framework defaults)

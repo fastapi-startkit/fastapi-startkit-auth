@@ -21,30 +21,44 @@ async def _auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:
 
 
 class AuthProvider:
-    """Registers the auth stack onto a FastAPI application.
+    """Service provider for the auth stack, following the startkit contract.
 
-    Instantiated with an :class:`AuthConfig`, it builds the :class:`AuthManager`,
-    stores it on ``app.state.auth_manager`` (where the dependencies read it),
-    mounts the OAuth2 router, and installs the OAuth2 error handler.
+    Mirrors ``fastapi_startkit.support.Provider`` without depending on the
+    framework: constructed as ``AuthProvider(application, config)``,
+    ``register()`` builds the :class:`AuthManager`, and ``boot()`` wires the
+    HTTP layer (routers, error handler, middleware) onto
+    ``application.fastapi``. List it in the application's providers::
+
+        Application(providers=[..., (AuthProvider, AuthConfig)])
+
+    All FastAPI wiring happens in ``boot()``: the framework only exposes its
+    FastAPI instance after the register phase.
     """
 
-    def __init__(self, config: Any, prefix: str = "") -> None:
+    provider_key = "auth"
+
+    def __init__(self, application: Any, config: Any = None, prefix: str = "") -> None:
+        self.app = application
         self.config = config
         self.prefix = prefix
-        self.manager = AuthManager(config)
+        self.manager: AuthManager | None = None
 
-    def register(self, app: FastAPI) -> None:
-        app.state.auth_manager = self.manager
-        app.include_router(build_router(prefix=self.prefix))
-        app.add_exception_handler(AuthError, _auth_error_handler)
+    def register(self) -> None:
+        self.manager = AuthManager(self.config)
+
+    def boot(self) -> None:
+        api: FastAPI = self.app.fastapi
+        api.state.auth_manager = self.manager
+        api.include_router(build_router(prefix=self.prefix))
+        api.add_exception_handler(AuthError, _auth_error_handler)
         if self.manager.has_session_guard():
             session = self.manager.session_config
             if self.manager.spa_enabled():
                 spa = self.manager.spa_config
-                app.include_router(build_spa_router(prefix=self.prefix))
+                api.include_router(build_spa_router(prefix=self.prefix))
                 # Added before SessionMiddleware so it ends up inside it and
                 # sees the loaded session on the request state.
-                app.add_middleware(
+                api.add_middleware(
                     CsrfMiddleware,
                     cookie=spa["csrf_cookie"],
                     header=spa["csrf_header"],
@@ -56,7 +70,7 @@ class AuthProvider:
                     domain=session["domain"],
                     path=session["path"],
                 )
-            app.add_middleware(
+            api.add_middleware(
                 SessionMiddleware,
                 store=self.manager.session_store,
                 cookie=session["cookie"],

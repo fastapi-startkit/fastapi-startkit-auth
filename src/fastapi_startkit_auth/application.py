@@ -6,10 +6,14 @@ from fastapi import FastAPI
 
 
 class Application:
-    """Thin composition root mirroring ``Application([(AuthProvider, AuthConfig)])``.
+    """Thin composition root mirroring the framework's provider lifecycle.
 
-    Creates a FastAPI app and registers each ``(ProviderClass, config)`` pair
-    onto it. The resulting FastAPI instance is exposed as ``.api`` and the
+    Providers are listed either bare or as a ``(ProviderClass, config)`` tuple
+    (the config is instantiated when it is a class, as the framework does).
+    Each provider is constructed as ``ProviderClass(application, config)``;
+    every ``register()`` runs first, then every ``boot()``. The FastAPI
+    instance is exposed as ``.fastapi`` (the accessor providers use, matching
+    the framework Application) with ``.api`` kept as an alias, and the
     Application is itself ASGI-callable, so it can be served directly::
 
         app = Application([(AuthProvider, AuthConfig)])
@@ -19,15 +23,27 @@ class Application:
 
     def __init__(
         self,
-        providers: Iterable[tuple[type, Any]] | None = None,
+        providers: Iterable[Any] | None = None,
         api: FastAPI | None = None,
     ) -> None:
         self.api = api or FastAPI(title="FastAPI Startkit Auth")
         self.providers: list[Any] = []
-        for provider_cls, config in providers or []:
-            provider = provider_cls(config)
-            provider.register(self.api)
+        for entry in providers or []:
+            if isinstance(entry, tuple):
+                provider_cls, config = entry
+                if callable(config):
+                    config = config()
+            else:
+                provider_cls, config = entry, None
+            provider = provider_cls(self, config=config)
+            provider.register()
             self.providers.append(provider)
+        for provider in self.providers:
+            provider.boot()
+
+    @property
+    def fastapi(self) -> FastAPI:
+        return self.api
 
     @property
     def auth(self):
