@@ -1,12 +1,4 @@
 #!/usr/bin/env python
-"""Console entrypoint (Laravel-style): `uv run python artisan <command>`.
-
-Importing the bootstrap module constructs the Application and registers it as
-the global container instance, so console commands resolve the same providers
-(and their published resources) the web app uses.
-
-    uv run python artisan provider:publish --provider=vite
-"""
 from bootstrap.app import app
 
 if __name__ == "__main__":
