@@ -10,16 +10,15 @@ import sqlite3
 import time
 
 import pytest
-from fastapi import Depends
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
-    Application,
     AuthConfig,
-    AuthProvider,
     InvalidToken,
     current_user,
     optional_user,
+    register_auth,
     require_abilities,
     require_scopes,
 )
@@ -338,12 +337,10 @@ def wire_routes(api):
 
 
 def make_client(api_tokens=None, guards=None, default=None):
-    application = Application(
-        [(AuthProvider, token_config(api_tokens=api_tokens, guards=guards, default=default))]
-    )
-    wire_routes(application.api)
-    client = TestClient(application.api)
-    return client, application.api.state.auth_manager
+    api = FastAPI()
+    manager = register_auth(api, token_config(api_tokens=api_tokens, guards=guards, default=default))
+    wire_routes(api)
+    return TestClient(api), manager
 
 
 SQL_API_TOKENS = {

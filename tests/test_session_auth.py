@@ -9,17 +9,16 @@ import sqlite3
 import warnings
 
 import pytest
-from fastapi import Body, Depends, Request
+from fastapi import Body, Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
-    Application,
     Auth,
     AuthConfig,
-    AuthProvider,
     InvalidSession,
     current_user,
     optional_user,
+    register_auth,
 )
 from fastapi_startkit_auth.guards import Guard, PassportGuard, SessionGuard
 from fastapi_startkit_auth.manager import AuthManager
@@ -90,9 +89,10 @@ def wire_routes(api):
 
 
 def make_client(session=None, guards=None):
-    application = Application([(AuthProvider, session_config(session=session, guards=guards))])
-    wire_routes(application.api)
-    return TestClient(application.api, base_url="https://testserver")
+    api = FastAPI()
+    register_auth(api, session_config(session=session, guards=guards))
+    wire_routes(api)
+    return TestClient(api, base_url="https://testserver")
 
 
 SQL_SESSION = {
@@ -277,9 +277,10 @@ def test_manager_without_session_guard_adds_no_middleware():
         guards = {"api": {"driver": "passport", "provider": "users"}}
         providers = {"users": {"driver": "instance", "instance": provider}}
 
-    application = Application([(AuthProvider, Config)])
-    assert not application.auth.has_session_guard()
-    assert application.api.user_middleware == []
+    api = FastAPI()
+    manager = register_auth(api, Config)
+    assert not manager.has_session_guard()
+    assert api.user_middleware == []
 
 
 def test_session_store_config_selects_implementation():

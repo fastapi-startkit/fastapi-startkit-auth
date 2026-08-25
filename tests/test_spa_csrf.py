@@ -7,16 +7,15 @@ Phase 1 cookie flow must keep working untouched when it is off.
 import sqlite3
 
 import pytest
-from fastapi import Body, Depends
+from fastapi import Body, Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
-    Application,
     Auth,
     AuthConfig,
-    AuthProvider,
     InvalidSession,
     current_user,
+    register_auth,
 )
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
@@ -86,9 +85,10 @@ def wire_routes(api):
 
 
 def make_client(spa=None, session=None):
-    application = Application([(AuthProvider, spa_config(spa=spa, session=session))])
-    wire_routes(application.api)
-    return TestClient(application.api, base_url="https://testserver")
+    api = FastAPI()
+    register_auth(api, spa_config(spa=spa, session=session))
+    wire_routes(api)
+    return TestClient(api, base_url="https://testserver")
 
 
 SQL_SESSION = {
@@ -316,9 +316,10 @@ def test_spa_mode_is_off_by_default():
         providers = {"users": {"driver": "instance", "instance": provider}}
         session = {}
 
-    application = Application([(AuthProvider, Config)])
-    wire_routes(application.api)
-    client = TestClient(application.api, base_url="https://testserver")
+    api = FastAPI()
+    register_auth(api, Config)
+    wire_routes(api)
+    client = TestClient(api, base_url="https://testserver")
 
     assert client.get("/__auth__/csrf-cookie").status_code == 404
     # Phase 1 behavior untouched: session-cookie requests need no CSRF header.

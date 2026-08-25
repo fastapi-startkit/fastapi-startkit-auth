@@ -9,14 +9,13 @@ import base64
 import hashlib
 
 import pytest
-from fastapi import Depends
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
-    Application,
-    AuthProvider,
     AuthConfig,
     current_user,
+    register_auth,
     require_scopes,
 )
 from fastapi_startkit_auth.security.hashing import BcryptHasher
@@ -65,10 +64,11 @@ def _build_app(*, users, notifier, debug_expose, throttle, expire, configure_api
                       "expire": expire, "throttle": throttle}
         }
 
-    application = Application([(AuthProvider, Config)])
+    api = FastAPI()
+    register_auth(api, Config)
     if configure_api is not None:
-        configure_api(application.api)
-    return application
+        configure_api(api)
+    return api
 
 
 def make_auth_client(*, users=DEFAULT_USERS, debug_expose=False, throttle=60,
@@ -80,7 +80,7 @@ def make_auth_client(*, users=DEFAULT_USERS, debug_expose=False, throttle=60,
     out-of-band delivery without reading tokens from the HTTP response.
     """
     sent = []
-    application = _build_app(
+    api = _build_app(
         users=users,
         notifier=lambda email, token: sent.append((email, token)),
         debug_expose=debug_expose,
@@ -88,7 +88,7 @@ def make_auth_client(*, users=DEFAULT_USERS, debug_expose=False, throttle=60,
         expire=expire,
         configure_api=configure_api,
     )
-    return TestClient(application.api), sent
+    return TestClient(api), sent
 
 
 @pytest.fixture

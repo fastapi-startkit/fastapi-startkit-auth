@@ -1,20 +1,23 @@
-"""AuthServiceProvider: framework-native publish integration + standalone gating.
+"""AuthProvider + AuthServiceProvider exercised through a real framework Application.
 
-The `fastapi-startkit` framework is an optional extra and is NOT installed in
-this test environment. The publish contract is exercised against a stub that
-mirrors the framework's ``Provider`` surface (``provider_key``, ``publishes``,
-``merge_config_from``); the standalone tests assert the package never
-requires the framework.
+Per https://fastapi-startkit.github.io/docs/testing/fastapi the framework's
+``HttpTestCase`` spins up the actual application and sends real HTTP requests
+through it. ``make_testing_application()`` builds a singleton startkit Application
+composing the auth providers exactly like a consuming app's
+``bootstrap/application.py``, so the register/boot lifecycle, the publish
+contract and the mounted routes are all verified against the real framework.
 """
-import importlib
 import runpy
-import sys
-import types
 from pathlib import Path
 
-import pytest
+from fastapi_startkit import Application
+from fastapi_startkit.fastapi import FastAPIConfig, FastAPIProvider
+from fastapi_startkit.fastapi.testing import HttpTestCase
+from fastapi_startkit.support import Provider
 
-FRAMEWORK_INSTALLED = importlib.util.find_spec("fastapi_startkit") is not None
+from fastapi_startkit_auth import AuthConfig, AuthProvider, AuthServiceProvider
+from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
+from fastapi_startkit_auth.security.hashing import BcryptHasher
 
 CORS_STUB = (
     Path(__file__).resolve().parents[1]
@@ -22,76 +25,89 @@ CORS_STUB = (
 )
 
 
-class FakeApplication:
-    def __init__(self):
-        self.published_resources = {}
-        self.merged_configs = []
+def seeded_users() -> InMemoryUserProvider:
+    hasher = BcryptHasher(rounds=4)
+    provider = InMemoryUserProvider(hasher=hasher, username_field="email")
+    provider.add({"id": 1, "email": "ada@example.com", "password": hasher.make("secret")})
+    return provider
 
 
-class StubProvider:
-    """Mirror of fastapi_startkit.support.Provider (framework 0.51.0)."""
-
-    provider_key = None
-
-    def __init__(self, application):
-        self.app = application
-
-    def register(self):
-        pass
-
-    def boot(self):
-        pass
-
-    def publishes(self, resources, tag=None):
-        self.app.published_resources.setdefault(self.provider_key, {}).update(resources)
-
-    def merge_config_from(self, source, provider_key):
-        self.app.merged_configs.append((source, provider_key))
+class Config(AuthConfig):
+    key = "startkit-provider-test-key-32-bytes-min!!"
+    bcrypt_rounds = 4
+    providers = {"users": {"driver": "instance", "instance": seeded_users()}}
 
 
-@pytest.fixture
-def startkit_module(monkeypatch):
-    """Import fastapi_startkit_auth.startkit against a stubbed framework."""
-    framework = types.ModuleType("fastapi_startkit")
-    support = types.ModuleType("fastapi_startkit.support")
-    support.Provider = StubProvider
-    framework.support = support
-    monkeypatch.setitem(sys.modules, "fastapi_startkit", framework)
-    monkeypatch.setitem(sys.modules, "fastapi_startkit.support", support)
-    sys.modules.pop("fastapi_startkit_auth.startkit", None)
-    module = importlib.import_module("fastapi_startkit_auth.startkit")
-    yield module
-    # Do not leak the stub-bound module into other tests.
-    sys.modules.pop("fastapi_startkit_auth.startkit", None)
+_TESTING_APP = None
 
 
-# --- publish contract ---------------------------------------------------
+def make_testing_application() -> Application:
+    """Singleton test Application, composed like a consuming app's bootstrap."""
+    global _TESTING_APP
+    if _TESTING_APP is None:
+        _TESTING_APP = Application(
+            base_path=Path(__file__).resolve().parent,
+            providers=[
+                (FastAPIProvider, FastAPIConfig),
+                (AuthProvider, Config),
+                AuthServiceProvider,
+            ],
+        )
+    return _TESTING_APP
 
 
-def test_provider_publishes_cors_stub_under_the_auth_key(startkit_module):
-    app = FakeApplication()
-    provider = startkit_module.AuthServiceProvider(app)
-    provider.register()
+class TestAuthProviderThroughTheFramework(HttpTestCase):
+    def get_application(self):
+        return make_testing_application()
 
-    assert provider.provider_key == "auth"  # `provider:publish -p auth`
-    assert app.published_resources == {"auth": {str(CORS_STUB): "config/cors.py"}}
-    published_source = next(iter(app.published_resources["auth"]))
-    assert Path(published_source).is_file()
+    async def test_password_grant_issues_a_token_through_the_real_app(self):
+        response = await self.post(
+            "/oauth/token",
+            data={"grant_type": "password", "username": "ada@example.com", "password": "secret"},
+        )
+        response.assert_ok()
+        assert response.json()["access_token"]
+
+    async def test_auth_error_handler_renders_oauth_errors(self):
+        response = await self.post(
+            "/oauth/token",
+            data={"grant_type": "password", "username": "ada@example.com", "password": "nope"},
+        )
+        response.assert_status(400)
+        assert response.json()["error"] == "invalid_grant"
 
 
-def test_provider_merges_cors_defaults_under_a_non_reserved_key(startkit_module):
-    app = FakeApplication()
-    startkit_module.AuthServiceProvider(app).register()
-    assert app.merged_configs == [(str(CORS_STUB), "cors")]
+def test_auth_provider_extends_the_framework_provider():
+    assert issubclass(AuthProvider, Provider)
+    assert issubclass(AuthServiceProvider, Provider)
 
 
-def test_provider_is_exported_from_the_package_root(startkit_module):
+def test_register_exposes_the_manager_on_the_wired_fastapi_app():
+    app = make_testing_application()
+    provider = next(p for p in app.providers if isinstance(p, AuthProvider))
+    assert provider.provider_key == "auth"
+    assert app.fastapi.state.auth_manager is provider.manager
+
+
+def test_service_provider_publishes_cors_stub_under_the_auth_key():
+    app = make_testing_application()
+    assert app.published_resources["auth"] == {str(CORS_STUB): "config/cors.py"}
+    assert Path(next(iter(app.published_resources["auth"]))).is_file()
+
+
+def test_service_provider_merges_cors_defaults_into_the_config_repository():
+    config = make_testing_application().make("config")
+    assert config.get("cors.allow_credentials") is True
+    assert "X-XSRF-TOKEN" in config.get("cors.allow_headers")
+
+
+def test_providers_are_exported_from_the_package_root():
     import fastapi_startkit_auth
+    from fastapi_startkit_auth.provider import AuthProvider as provider_cls
+    from fastapi_startkit_auth.startkit import AuthServiceProvider as service_cls
 
-    assert fastapi_startkit_auth.AuthServiceProvider is startkit_module.AuthServiceProvider
-
-
-# --- the published stub -------------------------------------------------
+    assert fastapi_startkit_auth.AuthProvider is provider_cls
+    assert fastapi_startkit_auth.AuthServiceProvider is service_cls
 
 
 def test_cors_stub_enables_credentials_and_refuses_wildcard_origins():
@@ -99,26 +115,3 @@ def test_cors_stub_enables_credentials_and_refuses_wildcard_origins():
     assert config["ALLOW_CREDENTIALS"] is True
     assert config["ALLOW_ORIGINS"] and "*" not in config["ALLOW_ORIGINS"]
     assert "X-XSRF-TOKEN" in config["ALLOW_HEADERS"]
-
-
-# --- standalone (no extra installed) ------------------------------------
-
-
-@pytest.mark.skipif(FRAMEWORK_INSTALLED, reason="fastapi-startkit is installed")
-def test_accessing_the_provider_without_the_extra_raises_a_helpful_error():
-    sys.modules.pop("fastapi_startkit_auth.startkit", None)
-    import fastapi_startkit_auth
-
-    with pytest.raises(ImportError, match=r"fastapi-startkit-auth\[startkit\]"):
-        fastapi_startkit_auth.AuthServiceProvider
-
-
-@pytest.mark.skipif(FRAMEWORK_INSTALLED, reason="fastapi-startkit is installed")
-def test_package_and_spa_mode_run_standalone_without_the_framework():
-    # The whole SPA feature set must work on plain FastAPI: importing the
-    # package and running the app never touches the optional dependency.
-    from test_spa_csrf import make_client
-
-    client = make_client()
-    assert client.get("/__auth__/csrf-cookie").status_code == 204
-    assert "fastapi_startkit" not in sys.modules

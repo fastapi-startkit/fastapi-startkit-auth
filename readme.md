@@ -11,7 +11,7 @@ OAuth2 grants and signed JWT access tokens (per the
 
 | Area | What you get |
 | --- | --- |
-| **Config layer** | `AuthConfig` (`default` / `guards` / `providers` / `passwords`) + `AuthProvider` that registers into the app |
+| **Config layer** | `AuthConfig` (`default` / `guards` / `providers` / `passwords`) + `AuthProvider` service provider (`register_auth` for plain FastAPI) |
 | **Password grant** | OAuth2 password grant → signed JWT access tokens with expiry (`/oauth/token`, `/token`) |
 | **Refresh tokens** | Opaque refresh tokens with **rotation** and configurable TTL |
 | **Personal access tokens** | Named, long-lived tokens with scopes/abilities |
@@ -27,18 +27,41 @@ OAuth2 grants and signed JWT access tokens (per the
 
 ```bash
 pip install fastapi-startkit-auth
-# optional ORM provider driver
-pip install "fastapi-startkit-auth[masoniteorm]"
 ```
+
+Requires Python 3.12+. Built for [fastapi-startkit](https://fastapi-startkit.github.io/docs/getting-started)
+applications: `AuthProvider` extends the framework's `Provider` base class, and
+the consuming application provides the framework (it is not pinned as a package
+dependency).
 
 > Uses `bcrypt` directly (not `passlib`, which imports the `crypt` stdlib module
 > removed in Python 3.13+), so it runs on modern Python.
 
 ## Quickstart
 
+In a `fastapi-startkit` application, list the provider in the application's
+providers (`bootstrap/application.py`):
+
 ```python
-from fastapi import Depends
-from fastapi_startkit_auth import Application, AuthProvider, AuthConfig, current_user, require_scopes
+from fastapi_startkit import Application
+from fastapi_startkit_auth import AuthProvider
+
+from config.auth import AuthConfig
+
+app = Application(
+    base_path=BASE_PATH,
+    providers=[
+        # ... framework providers ...
+        (AuthProvider, AuthConfig),
+    ],
+)
+```
+
+On a plain FastAPI app, wire the stack onto your own app with `register_auth`:
+
+```python
+from fastapi import Depends, FastAPI
+from fastapi_startkit_auth import AuthConfig, current_user, register_auth, require_scopes
 from myapp.models import User  # any active-record-style model
 
 
@@ -54,16 +77,16 @@ class Config(AuthConfig):
     }
 
 
-app = Application([(AuthProvider, Config)])
-api = app.api  # the underlying FastAPI instance
+app = FastAPI()
+register_auth(app, Config)
 
 
-@api.get("/me")
+@app.get("/me")
 def me(user=Depends(current_user)):
     return user
 
 
-@api.get("/reports")
+@app.get("/reports")
 def reports(ctx=Depends(require_scopes("reports:read"))):
     return {"ok": True}
 ```
@@ -71,8 +94,7 @@ def reports(ctx=Depends(require_scopes("reports:read"))):
 Serve it:
 
 ```bash
-uvicorn myapp:app        # Application is ASGI-callable
-uvicorn myapp:app.api    # or serve the FastAPI instance directly
+uvicorn myapp:app
 ```
 
 ## Configuration

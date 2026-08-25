@@ -18,7 +18,8 @@ def get_auth_manager(request: Request) -> AuthManager:
     manager = getattr(request.app.state, "auth_manager", None)
     if manager is None:  # pragma: no cover - misconfiguration guard
         raise RuntimeError(
-            "No AuthManager on the application. Did you register AuthProvider via Application?"
+            "No AuthManager on the application. Wire the auth stack with "
+            "register_auth(app, config), or list AuthProvider in the startkit providers."
         )
     return manager
 

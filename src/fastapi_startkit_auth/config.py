@@ -27,6 +27,9 @@ class AuthConfig:
     providers: dict[str, dict[str, Any]] = {}
     passwords: dict[str, dict[str, Any]] = {}
 
+    # Mount prefix for the auth routes (e.g. "/auth"); "" mounts at the root.
+    prefix: str = ""
+
     # --- session settings (cookie auth; used by {"driver": "session"} guards) --
     # ``store`` selects the backend: "memory" (default), "sql" (requires a
     # DB-API ``connection`` — or zero-arg factory — plus optional ``table``),
