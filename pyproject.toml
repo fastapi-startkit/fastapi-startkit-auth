@@ -2,7 +2,7 @@
 name = "fastapi-startkit-auth"
 version = "0.3.0"
 description = "Laravel-style authentication for FastAPI: OAuth2/JWT authorization server, cookie/session guard, SPA + CSRF protection, and Sanctum-style API tokens."
-readme = "readme.md"
+readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 keywords = [
@@ -25,14 +25,13 @@ keywords = [
 authors = [
     {name = "Bedram Tamang", email = "tmgbedu@gmail.com"}
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: FastAPI",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -40,6 +39,7 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: Session",
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 dependencies = [
     "fastapi>=0.110",
@@ -53,13 +53,13 @@ dependencies = [
 Homepage = "https://github.com/fastapi-startkit/fastapi-startkit-auth"
 Repository = "https://github.com/fastapi-startkit/fastapi-startkit-auth"
 Issues = "https://github.com/fastapi-startkit/fastapi-startkit-auth/issues"
-Changelog = "https://github.com/fastapi-startkit/fastapi-startkit-auth/releases"
+Changelog = "https://github.com/fastapi-startkit/fastapi-startkit-auth/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 masoniteorm = ["masonite-orm>=2.18"]
 # The framework itself only supports Python >=3.12; on older interpreters the
 # extra resolves to nothing and the package stays standalone.
-startkit = ["fastapi-startkit>=0.51; python_version >= '3.12'"]
+startkit = ["fastapi-startkit>=0.51,<1.0; python_version >= '3.12'"]
 test = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
@@ -72,7 +72,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
     "ruff>=0.9.0",
-    "twine>=6.0.0",
+    "twine>=6.1.0",
 ]
 
 [tool.uv]
@@ -105,3 +105,6 @@ norecursedirs = [".venv", "dist", "build", "__pycache__"]
 [build-system]
 requires = ["uv_build>=0.10.10,<0.11.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-include = ["CHANGELOG.md", "tests/**"]

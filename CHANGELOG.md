@@ -7,6 +7,26 @@ Release notes are also published on
 
 ## [Unreleased]
 
+### Changed
+
+- Minimum supported Python is now 3.10. 0.3.0 advertised `>=3.9` but fails on
+  3.9 because runtime-evaluated annotations use `X | None` syntax.
+- The `startkit` extra is bounded to `fastapi-startkit>=0.51,<1.0`.
+- The package `__init__` imports its public API directly instead of through a
+  lazy export table.
+- The source distribution now ships the test suite and this changelog.
+- Releases are published from GitHub Actions via PyPI trusted publishing on
+  `vX.Y.Z` tags, replacing `bin/release.sh`.
+
+### Added
+
+- `Typing :: Typed` classifier (the package already ships `py.typed`).
+
+## [0.3.0]
+
+First release published to PyPI. Contains the 0.2.0 feature set, built with
+the `uv_build` backend; no functional changes.
+
 ## [0.2.0]
 
 Adds three new authentication modes alongside the existing OAuth2/JWT server,

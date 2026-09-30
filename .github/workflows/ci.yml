@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Pytest (py${{ matrix.python }}${{ matrix.extra && format(', {0}', matrix.extra) || '' }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+        extra: [""]
+        include:
+          - python: "3.13"
+            extra: startkit
+          - python: "3.13"
+            extra: masoniteorm
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked --group dev ${{ matrix.extra && format('--extra {0}', matrix.extra) || '' }}
+      - run: uv run pytest
+
+  lint-and-build:
+    name: Lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          python-version: "3.13"
+      - run: uv sync --locked --group dev
+      - run: uv run ruff check .
+      - run: uv build
+      - run: uv run twine check --strict dist/*
