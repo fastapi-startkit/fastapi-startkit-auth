@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from ..concurrency import resolve
 from ..exceptions import InvalidToken
 from .models import ApiTokenRecord
 from .repository import ApiTokenRepository, generate_token_secret, hash_token_secret
@@ -15,6 +16,39 @@ from .repository import ApiTokenRepository, generate_token_secret, hash_token_se
 _GENERIC_FAILURE = "The API token is invalid."
 
 _DUMMY_HASH = hash_token_secret("!" + generate_token_secret())
+
+
+def _split_token(token: str) -> tuple[str | None, str]:
+    token_id, sep, secret = token.partition("|")
+    if sep and token_id and secret:
+        return token_id, secret
+    return None, secret
+
+
+def _check_secret(record: ApiTokenRecord | None, secret: str) -> None:
+    expected = record.token_hash if record is not None else _DUMMY_HASH
+    matched = secrets.compare_digest(hash_token_secret(secret), expected)
+    if record is None or not matched or record.expired:
+        raise InvalidToken(_GENERIC_FAILURE)
+
+
+def _creation_fields(
+    user_id: Any,
+    secret: str,
+    name: str | None,
+    abilities: list[str] | None,
+    expires_at: float | None,
+    default_ttl: float | None,
+) -> dict[str, Any]:
+    if expires_at is None and default_ttl is not None:
+        expires_at = time.time() + default_ttl
+    return {
+        "user_id": user_id,
+        "token_hash": hash_token_secret(secret),
+        "name": name,
+        "abilities": list(abilities) if abilities else ["*"],
+        "expires_at": expires_at,
+    }
 
 
 @dataclass(repr=False)
@@ -80,16 +114,8 @@ class ApiTokenManager:
         the unrestricted ``["*"]``.
         """
         self._maybe_purge()
-        if expires_at is None and self._default_ttl is not None:
-            expires_at = time.time() + self._default_ttl
         secret = generate_token_secret()
-        record = self.repository.create(
-            user_id=user_id,
-            token_hash=hash_token_secret(secret),
-            name=name,
-            abilities=list(abilities) if abilities else ["*"],
-            expires_at=expires_at,
-        )
+        record = self.repository.create(**_creation_fields(user_id, secret, name, abilities, expires_at, self._default_ttl))
         return NewApiToken(record=record, plain_text=f"{record.id}|{secret}")
 
     def verify(self, token: str) -> ApiTokenRecord:
@@ -99,16 +125,9 @@ class ApiTokenManager:
         against the stored hash — or against a dummy hash when the id is
         unknown, so the miss path costs the same as a mismatch.
         """
-        token_id, sep, secret = token.partition("|")
-        expected = _DUMMY_HASH
-        record = None
-        if sep and token_id and secret:
-            record = self.repository.find(token_id)
-            if record is not None:
-                expected = record.token_hash
-        matched = secrets.compare_digest(hash_token_secret(secret), expected)
-        if record is None or not matched or record.expired:
-            raise InvalidToken(_GENERIC_FAILURE)
+        token_id, secret = _split_token(token)
+        record = self.repository.find(token_id) if token_id else None
+        _check_secret(record, secret)
         self.repository.touch(record.id)
         return record
 
@@ -120,3 +139,47 @@ class ApiTokenManager:
 
     def tokens_for(self, user_id: Any) -> list[ApiTokenRecord]:
         return self.repository.list_for_user(user_id)
+
+
+class AsyncApiTokenManager:
+    def __init__(self, repository: Any, default_ttl: float | None = None, purge_interval: float = 300) -> None:
+        self.repository = repository
+        self._default_ttl = default_ttl
+        self._purge_interval = purge_interval
+        self._last_purge = time.time()
+
+    async def _maybe_purge(self) -> None:
+        now = time.time()
+        if now - self._last_purge < self._purge_interval:
+            return
+        self._last_purge = now
+        await resolve(self.repository.purge_expired())
+
+    async def create(
+        self,
+        user_id: Any,
+        name: str | None = None,
+        abilities: list[str] | None = None,
+        expires_at: float | None = None,
+    ) -> NewApiToken:
+        await self._maybe_purge()
+        secret = generate_token_secret()
+        fields = _creation_fields(user_id, secret, name, abilities, expires_at, self._default_ttl)
+        record = await resolve(self.repository.create(**fields))
+        return NewApiToken(record=record, plain_text=f"{record.id}|{secret}")
+
+    async def verify(self, token: str) -> ApiTokenRecord:
+        token_id, secret = _split_token(token)
+        record = await resolve(self.repository.find(token_id)) if token_id else None
+        _check_secret(record, secret)
+        await resolve(self.repository.touch(record.id))
+        return record
+
+    async def revoke(self, token_id: str) -> bool:
+        return await resolve(self.repository.revoke(token_id))
+
+    async def revoke_all(self, user_id: Any) -> int:
+        return await resolve(self.repository.revoke_all_for_user(user_id))
+
+    async def tokens_for(self, user_id: Any) -> list[ApiTokenRecord]:
+        return await resolve(self.repository.list_for_user(user_id))

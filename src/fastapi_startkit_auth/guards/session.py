@@ -5,7 +5,8 @@ from typing import Any
 from fastapi import Request
 
 from ..exceptions import InvalidSession
-from ..providers.base import UserProvider
+from ..concurrency import resolve
+from ..providers.base import UserProvider, user_is_active
 from ..sessions.models import SessionRecord
 from ..sessions.state import FORGET_KEY, SESSION_KEY
 from ..sessions.store import SessionStore
@@ -75,7 +76,54 @@ class SessionGuard:
             # token but no user, and must survive 401s so the SPA can log in.
             raise InvalidSession("Not authenticated.")
         user = self.provider.retrieve_by_id(record.user_id)
-        if user is None:
+        if user is None or not user_is_active(self.provider, user):
             self.store.invalidate(record.id)
+            raise InvalidSession("The session user no longer exists.")
+        return AuthContext(user=user, scopes=["*"])
+
+
+class AsyncSessionGuard:
+    def __init__(self, name: str, store: Any, provider: Any, ttl: float | None) -> None:
+        self.name = name
+        self.store = store
+        self.provider = provider
+        self.ttl = ttl
+
+    async def user_from_token(self, access_token: str) -> AuthContext:
+        record = await resolve(self.store.find(access_token))
+        if record is None:
+            raise InvalidSession("Not authenticated.")
+        return await self._context(record)
+
+    async def authenticate(self, request: Request) -> AuthContext:
+        record = getattr(request.state, SESSION_KEY, None)
+        if record is None:
+            raise InvalidSession("Not authenticated.")
+        return await self._context(record)
+
+    async def login(self, request: Request, user: Any) -> SessionRecord:
+        previous = getattr(request.state, SESSION_KEY, None)
+        record = await resolve(
+            self.store.create(user_id=self.provider.get_identifier(user), guard=self.name, ttl=self.ttl)
+        )
+        if previous is not None:
+            await resolve(self.store.invalidate(previous.id))
+        setattr(request.state, SESSION_KEY, record)
+        setattr(request.state, FORGET_KEY, False)
+        return record
+
+    async def logout(self, request: Request) -> None:
+        record = getattr(request.state, SESSION_KEY, None)
+        if record is not None:
+            await resolve(self.store.invalidate(record.id))
+        setattr(request.state, SESSION_KEY, None)
+        setattr(request.state, FORGET_KEY, True)
+
+    async def _context(self, record: SessionRecord) -> AuthContext:
+        if record.user_id is None:
+            raise InvalidSession("Not authenticated.")
+        user = await resolve(self.provider.retrieve_by_id(record.user_id))
+        if user is None or not user_is_active(self.provider, user):
+            await resolve(self.store.invalidate(record.id))
             raise InvalidSession("The session user no longer exists.")
         return AuthContext(user=user, scopes=["*"])

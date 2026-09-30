@@ -7,8 +7,47 @@ Release notes are also published on
 
 ## [Unreleased]
 
+## [0.4.0]
+
+### Added
+
+- Async support for async ORMs and drivers, side by side with the sync API:
+  - `AsyncModelUserProvider` (provider driver `"async_model"`) for models whose
+    `find` / `where(...).first()` / `save` are coroutines; bcrypt runs in a
+    worker thread.
+  - `AsyncPassportGuard`, `AsyncSessionGuard`, `AsyncTokenGuard`,
+    `AsyncTokenService`, `AsyncApiTokenManager`, `AsyncPasswordBroker`, the
+    `Async*Grant` variants and the `AsyncAuth` facade.
+  - `AuthManager` picks the async variant automatically when the provider or a
+    store is async; sync configurations keep getting the sync classes.
+  - `"async_sql"` stores for sessions (`AsyncSqlSessionStore`), personal API
+    tokens (`AsyncSqlApiTokenRepository`) and a new `AuthConfig.tokens` block
+    for OAuth access/refresh tokens and authorization codes
+    (`AsyncSqlTokenRepository`). They accept an asyncpg pool/connection, an
+    aiosqlite connection, or a zero-arg (async) factory. Refresh tokens and
+    authorization codes are stored as SHA-256 hashes; refresh revocation and
+    code redemption are atomic.
+  - `fastapi-startkit` migrations for the five tables, published to
+    `databases/migrations/` by `AuthServiceProvider`.
+- `password_key` provider option: the credentials key holding the plaintext
+  password, separate from the model column `password_field` (e.g.
+  `password_key="password"`, `password_field="hashed_password"`). Defaults to
+  `password_field`.
+- `is_active` provider option (attribute name or callable). Inactive users are
+  rejected by the password grant, `Auth.attempt`, and every guard.
+- CI runs the asyncpg store and flow tests against a Postgres service.
+- `Typing :: Typed` classifier (the package already ships `py.typed`).
+
 ### Changed
 
+- **Breaking (signature):** `current_context` and `optional_user` are now
+  `async def` dependencies. `Depends(current_user)` and friends keep working
+  unchanged; code calling them directly as plain functions must now await
+  them. Sync guards still run in the threadpool.
+- The built-in OAuth, password-reset and SPA csrf-cookie routes await async
+  collaborators; `SessionMiddleware` accepts an async session store.
+- `Auth` (sync facade) raises `RuntimeError` for async session guards; use
+  `AsyncAuth` there.
 - Minimum supported Python is now 3.10. 0.3.0 advertised `>=3.9` but fails on
   3.9 because runtime-evaluated annotations use `X | None` syntax.
 - The `startkit` extra is bounded to `fastapi-startkit>=0.51,<1.0`.
@@ -17,10 +56,6 @@ Release notes are also published on
 - The source distribution now ships the test suite and this changelog.
 - Releases are published from GitHub Actions via PyPI trusted publishing on
   `vX.Y.Z` tags, replacing `bin/release.sh`.
-
-### Added
-
-- `Typing :: Typed` classifier (the package already ships `py.typed`).
 
 ## [0.3.0]
 

@@ -36,3 +36,25 @@ class UserProvider(Protocol):
 
     def update_password(self, user: User, plain: str) -> None:
         """Persist a new hashed password for ``user`` (used by password resets)."""
+
+
+@runtime_checkable
+class AsyncUserProvider(Protocol):
+    async def retrieve_by_id(self, identifier: Any) -> User | None: ...
+
+    async def retrieve_by_credentials(self, credentials: dict[str, Any]) -> User | None: ...
+
+    async def validate_credentials(self, user: User, credentials: dict[str, Any]) -> bool: ...
+
+    async def dummy_verify(self) -> None: ...
+
+    def get_identifier(self, user: User) -> Any: ...
+
+    def is_active(self, user: User) -> bool: ...
+
+    async def update_password(self, user: User, plain: str) -> None: ...
+
+
+def user_is_active(provider: Any, user: User) -> bool:
+    check = getattr(provider, "is_active", None)
+    return True if check is None else bool(check(user))

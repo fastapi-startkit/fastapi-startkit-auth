@@ -4,8 +4,12 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from ..exceptions import InvalidToken
-from ..providers.base import UserProvider
+from ..concurrency import resolve
+from ..providers.base import UserProvider, user_is_active
 from ..tokens.service import TokenService
+
+
+_INACTIVE_SUBJECT = "The token subject is not active."
 
 
 @dataclass
@@ -65,13 +69,7 @@ class PassportGuard:
 
     def user_from_token(self, access_token: str) -> AuthContext:
         claims = self._tokens.authenticate(access_token)
-        user = self._resolve_user(claims.get("sub"))
-        return AuthContext(
-            user=user,
-            scopes=list(claims.get("scopes", [])),
-            client_id=claims.get("client_id"),
-            jti=claims.get("jti"),
-        )
+        return _context_from_claims(claims, self._resolve_user(claims.get("sub")))
 
     def _resolve_user(self, sub: Any) -> Any | None:
         if sub is None:
@@ -82,4 +80,38 @@ class PassportGuard:
             user = self.provider.retrieve_by_id(int(sub))
         if user is None:
             raise InvalidToken("The token subject no longer exists.")
+        if not user_is_active(self.provider, user):
+            raise InvalidToken(_INACTIVE_SUBJECT)
+        return user
+
+
+def _context_from_claims(claims: dict[str, Any], user: Any | None) -> AuthContext:
+    return AuthContext(
+        user=user,
+        scopes=list(claims.get("scopes", [])),
+        client_id=claims.get("client_id"),
+        jti=claims.get("jti"),
+    )
+
+
+class AsyncPassportGuard:
+    def __init__(self, name: str, token_service: Any, provider: Any) -> None:
+        self.name = name
+        self._tokens = token_service
+        self.provider = provider
+
+    async def user_from_token(self, access_token: str) -> AuthContext:
+        claims = await resolve(self._tokens.authenticate(access_token))
+        return _context_from_claims(claims, await self._resolve_user(claims.get("sub")))
+
+    async def _resolve_user(self, sub: Any) -> Any | None:
+        if sub is None:
+            return None
+        user = await resolve(self.provider.retrieve_by_id(sub))
+        if user is None and isinstance(sub, str) and sub.isdigit():
+            user = await resolve(self.provider.retrieve_by_id(int(sub)))
+        if user is None:
+            raise InvalidToken("The token subject no longer exists.")
+        if not user_is_active(self.provider, user):
+            raise InvalidToken(_INACTIVE_SUBJECT)
         return user

@@ -4,29 +4,33 @@ import secrets
 import warnings
 from typing import Any, Callable
 
-from .apitokens.manager import ApiTokenManager
+from .apitokens.async_sql import AsyncSqlApiTokenRepository
+from .apitokens.manager import ApiTokenManager, AsyncApiTokenManager
 from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
 from .apitokens.sql import SqlApiTokenRepository
 from .clients.repository import InMemoryClientRepository
+from .concurrency import is_async
 from .config import AuthConfig, as_config_class
-from .grants.authorization_code import AuthorizationCodeGrant
-from .grants.client_credentials import ClientCredentialsGrant
-from .grants.password import PasswordGrant
-from .grants.refresh import RefreshTokenGrant
-from .guards.guard import Guard, PassportGuard
-from .guards.session import SessionGuard
-from .guards.token import TokenGuard
-from .passwords.broker import PasswordBroker
+from .grants.authorization_code import AsyncAuthorizationCodeGrant, AuthorizationCodeGrant
+from .grants.client_credentials import AsyncClientCredentialsGrant, ClientCredentialsGrant
+from .grants.password import AsyncPasswordGrant, PasswordGrant
+from .grants.refresh import AsyncRefreshTokenGrant, RefreshTokenGrant
+from .guards.guard import AsyncPassportGuard, Guard, PassportGuard
+from .guards.session import AsyncSessionGuard, SessionGuard
+from .guards.token import AsyncTokenGuard, TokenGuard
+from .passwords.broker import AsyncPasswordBroker, PasswordBroker
 from .passwords.repository import InMemoryPasswordResetRepository
 from .providers.base import UserProvider
 from .providers.memory import InMemoryUserProvider
-from .providers.model import ModelUserProvider
+from .providers.model import AsyncModelUserProvider, ModelUserProvider
 from .security.hashing import BcryptHasher
 from .security.jwt import JWTEncoder
+from .sessions.async_sql import AsyncSqlSessionStore
 from .sessions.sql import SqlSessionStore
 from .sessions.store import InMemorySessionStore, SessionStore
+from .tokens.async_sql import AsyncSqlTokenRepository
 from .tokens.repository import InMemoryTokenRepository
-from .tokens.service import TokenService
+from .tokens.service import AsyncTokenService, TokenService
 
 GuardFactory = Callable[[str, dict[str, Any]], Guard]
 
@@ -43,6 +47,17 @@ def _resolve_connection(connection: Any) -> Any:
         return connection
     if callable(connection):
         return connection()
+    return connection
+
+
+def _any_async(provider: Any) -> bool:
+    return is_async(provider, "retrieve_by_id") or is_async(provider, "retrieve_by_credentials")
+
+
+def _require_connection(spec: dict[str, Any], section: str) -> Any:
+    connection = spec.get("connection")
+    if connection is None:
+        raise ValueError(f'AuthConfig.{section} with store "{spec.get("store")}" requires a "connection".')
     return connection
 
 
@@ -72,8 +87,12 @@ class AuthManager:
             )
         self.encoder = JWTEncoder(secret=key, algorithm=cfg.get("algorithm", "HS256"))
 
-        self.token_repository = InMemoryTokenRepository()
-        self.token_service = TokenService(
+        self.tokens_config = {**AuthConfig.tokens, **cfg.get("tokens", {})}
+        self.token_repository = self._build_token_repository()
+        token_service_class = (
+            AsyncTokenService if is_async(self.token_repository, "find_access_token") else TokenService
+        )
+        self.token_service = token_service_class(
             encoder=self.encoder,
             repository=self.token_repository,
             access_ttl=cfg.get("access_token_ttl", 3600),
@@ -116,16 +135,22 @@ class AuthManager:
             provider = InMemoryUserProvider(
                 hasher=self.hasher,
                 username_field=spec.get("username_field", "email"),
+                password_field=spec.get("password_field", "password"),
+                password_key=spec.get("password_key"),
+                is_active=spec.get("is_active"),
             )
             for user in spec.get("users", []):
                 provider.add(user)
             return provider
-        if driver in ("masoniteorm", "orm", "model"):
-            return ModelUserProvider(
+        if driver in ("masoniteorm", "orm", "model", "async_model"):
+            provider_class = AsyncModelUserProvider if driver == "async_model" else ModelUserProvider
+            return provider_class(
                 model=spec["model"],
                 hasher=self.hasher,
                 username_field=spec.get("username_field", "email"),
                 password_field=spec.get("password_field", "password"),
+                password_key=spec.get("password_key"),
+                is_active=spec.get("is_active"),
                 id_field=spec.get("id_field", "id"),
             )
         raise ValueError(f"Unknown user provider driver: {driver!r}")
@@ -155,7 +180,12 @@ class AuthManager:
 
     def _build_passport_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
-        return PassportGuard(name=name, token_service=self.token_service, provider=provider)
+        guard_class = (
+            AsyncPassportGuard
+            if _any_async(provider) or isinstance(self.token_service, AsyncTokenService)
+            else PassportGuard
+        )
+        return guard_class(name=name, token_service=self.token_service, provider=provider)
 
     def _build_session_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
@@ -165,7 +195,8 @@ class AuthManager:
                 "over plain HTTP. Enable it in production.",
                 stacklevel=2,
             )
-        return SessionGuard(
+        guard_class = AsyncSessionGuard if _any_async(provider) or is_async(self.session_store, "find") else SessionGuard
+        return guard_class(
             name=name,
             store=self.session_store,
             provider=provider,
@@ -174,7 +205,10 @@ class AuthManager:
 
     def _build_token_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
-        return TokenGuard(
+        guard_class = (
+            AsyncTokenGuard if _any_async(provider) or isinstance(self.api_tokens, AsyncApiTokenManager) else TokenGuard
+        )
+        return guard_class(
             name=name,
             tokens=self.api_tokens,
             provider=provider,
@@ -182,7 +216,7 @@ class AuthManager:
         )
 
     @property
-    def api_tokens(self) -> ApiTokenManager:
+    def api_tokens(self) -> ApiTokenManager | AsyncApiTokenManager:
         """The API-token manager, built on first use.
 
         Lazy for the same reason as :attr:`session_store`: apps without a token
@@ -190,8 +224,10 @@ class AuthManager:
         SQL connection.
         """
         if self._api_tokens is None:
-            self._api_tokens = ApiTokenManager(
-                repository=self._build_api_token_repository(),
+            repository = self._build_api_token_repository()
+            manager_class = AsyncApiTokenManager if is_async(repository, "find") else ApiTokenManager
+            self._api_tokens = manager_class(
+                repository=repository,
                 default_ttl=self.api_tokens_config.get("ttl"),
                 purge_interval=self.api_tokens_config.get("purge_interval", 300),
             )
@@ -209,6 +245,11 @@ class AuthManager:
             connection = _resolve_connection(connection)
             return SqlApiTokenRepository(
                 connection,
+                table=spec.get("table", "personal_api_tokens"),
+            )
+        if kind == "async_sql":
+            return AsyncSqlApiTokenRepository(
+                _require_connection(spec, "api_tokens"),
                 table=spec.get("table", "personal_api_tokens"),
             )
         if kind == "instance":
@@ -243,14 +284,41 @@ class AuthManager:
                 idle_ttl=idle_ttl,
                 purge_interval=spec.get("purge_interval", 300),
             )
+        if kind == "async_sql":
+            return AsyncSqlSessionStore(
+                _require_connection(spec, "session"),
+                table=spec.get("table", "sessions"),
+                idle_ttl=idle_ttl,
+                purge_interval=spec.get("purge_interval", 300),
+            )
         if kind == "instance":
             return spec["instance"]
         raise ValueError(f"Unknown session store: {kind!r}")
 
+    def _build_token_repository(self) -> Any:
+        spec = self.tokens_config
+        kind = spec.get("store", "memory")
+        if kind == "memory":
+            return InMemoryTokenRepository()
+        if kind == "async_sql":
+            return AsyncSqlTokenRepository(
+                _require_connection(spec, "tokens"),
+                access_table=spec.get("access_table", "oauth_access_tokens"),
+                refresh_table=spec.get("refresh_table", "oauth_refresh_tokens"),
+                codes_table=spec.get("codes_table", "oauth_auth_codes"),
+            )
+        if kind == "instance":
+            return spec["instance"]
+        raise ValueError(f"Unknown tokens store: {kind!r}")
+
     def session_guard_name(self) -> str | None:
         """Name of the first configured session guard, or ``None``."""
         return next(
-            (name for name, guard in self._guards.items() if isinstance(guard, SessionGuard)),
+            (
+                name
+                for name, guard in self._guards.items()
+                if isinstance(guard, (SessionGuard, AsyncSessionGuard))
+            ),
             None,
         )
 
@@ -260,9 +328,10 @@ class AuthManager:
     def spa_enabled(self) -> bool:
         return bool(self.spa_config.get("enabled"))
 
-    def _build_broker(self, spec: dict[str, Any]) -> PasswordBroker:
+    def _build_broker(self, spec: dict[str, Any]) -> PasswordBroker | AsyncPasswordBroker:
         provider = self._resolve_broker_provider(spec.get("provider"))
-        return PasswordBroker(
+        broker_class = AsyncPasswordBroker if _any_async(provider) else PasswordBroker
+        return broker_class(
             user_provider=provider,
             repository=InMemoryPasswordResetRepository(),
             hasher=self.hasher,
@@ -295,7 +364,7 @@ class AuthManager:
     def provider(self, name: str) -> UserProvider:
         return self._require_provider(name)
 
-    def broker(self, name: str | None = None) -> PasswordBroker:
+    def broker(self, name: str | None = None) -> PasswordBroker | AsyncPasswordBroker:
         name = name or self._config.get("default", {}).get("passwords")
         if name not in self._brokers:
             raise ValueError(f"Password broker {name!r} is not defined in AuthConfig.passwords")
@@ -305,16 +374,23 @@ class AuthManager:
         return self._config.get("default", {}).get("guard")
 
     # --- grant factories ----------------------------------------------
-    def password_grant(self, guard: str | None = None) -> PasswordGrant:
-        return PasswordGrant(self.token_service, self.guard(guard).provider)
+    def _tokens_async(self) -> bool:
+        return isinstance(self.token_service, AsyncTokenService)
 
-    def client_credentials_grant(self) -> ClientCredentialsGrant:
-        return ClientCredentialsGrant(self.token_service)
+    def password_grant(self, guard: str | None = None) -> PasswordGrant | AsyncPasswordGrant:
+        provider = self.guard(guard).provider
+        if self._tokens_async() or _any_async(provider):
+            return AsyncPasswordGrant(self.token_service, provider)
+        return PasswordGrant(self.token_service, provider)
 
-    def refresh_grant(self) -> RefreshTokenGrant:
-        return RefreshTokenGrant(self.token_service)
+    def client_credentials_grant(self) -> ClientCredentialsGrant | AsyncClientCredentialsGrant:
+        grant_class = AsyncClientCredentialsGrant if self._tokens_async() else ClientCredentialsGrant
+        return grant_class(self.token_service)
 
-    def authorization_code_grant(self) -> AuthorizationCodeGrant:
-        return AuthorizationCodeGrant(
-            self.token_service, code_ttl=self._config.get("authorization_code_ttl", 600)
-        )
+    def refresh_grant(self) -> RefreshTokenGrant | AsyncRefreshTokenGrant:
+        grant_class = AsyncRefreshTokenGrant if self._tokens_async() else RefreshTokenGrant
+        return grant_class(self.token_service)
+
+    def authorization_code_grant(self) -> AuthorizationCodeGrant | AsyncAuthorizationCodeGrant:
+        grant_class = AsyncAuthorizationCodeGrant if self._tokens_async() else AuthorizationCodeGrant
+        return grant_class(self.token_service, code_ttl=self._config.get("authorization_code_ttl", 600))

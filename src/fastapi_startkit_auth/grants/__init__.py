@@ -1,13 +1,17 @@
-from .authorization_code import AuthorizationCodeGrant
-from .client_credentials import ClientCredentialsGrant
-from .password import PasswordGrant
+from .authorization_code import AsyncAuthorizationCodeGrant, AuthorizationCodeGrant
+from .client_credentials import AsyncClientCredentialsGrant, ClientCredentialsGrant
+from .password import AsyncPasswordGrant, PasswordGrant
 from .pkce import verify_pkce
-from .refresh import RefreshTokenGrant
+from .refresh import AsyncRefreshTokenGrant, RefreshTokenGrant
 
 __all__ = [
     "PasswordGrant",
     "ClientCredentialsGrant",
     "RefreshTokenGrant",
     "AuthorizationCodeGrant",
+    "AsyncPasswordGrant",
+    "AsyncClientCredentialsGrant",
+    "AsyncRefreshTokenGrant",
+    "AsyncAuthorizationCodeGrant",
     "verify_pkce",
 ]

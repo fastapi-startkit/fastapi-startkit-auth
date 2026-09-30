@@ -7,6 +7,7 @@ modules. Everything stays in-memory (no DB, no network): providers use
 """
 import base64
 import hashlib
+import os
 
 import pytest
 from fastapi import Depends
@@ -117,3 +118,33 @@ def client():
 
     test_client, _ = make_auth_client(debug_expose=True, configure_api=configure_api)
     return test_client
+
+
+ASYNC_TABLES = (
+    "sessions",
+    "personal_api_tokens",
+    "oauth_access_tokens",
+    "oauth_refresh_tokens",
+    "oauth_auth_codes",
+)
+ASYNCPG_DSN = os.environ.get("TEST_ASYNCPG_DSN")
+
+
+@pytest.fixture(params=["aiosqlite", "asyncpg"])
+async def async_connection(request):
+    if request.param == "aiosqlite":
+        import aiosqlite
+
+        connection = await aiosqlite.connect(":memory:")
+        yield connection
+        await connection.close()
+        return
+    if not ASYNCPG_DSN:
+        pytest.skip("TEST_ASYNCPG_DSN is not set")
+    import asyncpg
+
+    pool = await asyncpg.create_pool(ASYNCPG_DSN, min_size=1, max_size=4)
+    for table in ASYNC_TABLES:
+        await pool.execute(f"DROP TABLE IF EXISTS {table}")
+    yield pool
+    await pool.close()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, Response
 
+from .concurrency import call
 from .dependencies import get_auth_manager
 from .manager import AuthManager
 from .sessions.state import FORGET_KEY, SESSION_KEY
@@ -11,7 +12,7 @@ def build_spa_router(prefix: str = "") -> APIRouter:
     router = APIRouter(prefix=prefix)
 
     @router.get("/__auth__/csrf-cookie", status_code=204)
-    def csrf_cookie(request: Request, manager: AuthManager = Depends(get_auth_manager)) -> Response:
+    async def csrf_cookie(request: Request, manager: AuthManager = Depends(get_auth_manager)) -> Response:
         """Prime a SPA for cookie auth (``axios.get("/__auth__/csrf-cookie")``).
 
         Ensures a session exists — starting a guest one (no user) when the
@@ -20,7 +21,8 @@ def build_spa_router(prefix: str = "") -> APIRouter:
         """
         record = getattr(request.state, SESSION_KEY, None)
         if record is None:
-            record = manager.session_store.create(
+            record = await call(
+                manager.session_store.create,
                 user_id=None,
                 guard=manager.session_guard_name(),
                 ttl=manager.session_config.get("ttl"),

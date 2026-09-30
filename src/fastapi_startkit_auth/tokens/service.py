@@ -7,6 +7,8 @@ from typing import Any
 
 from ..exceptions import InvalidGrant, InvalidToken
 from ..security.jwt import JWTEncoder
+from ..concurrency import resolve
+from .models import AccessTokenRecord, RefreshTokenRecord
 from .repository import InMemoryTokenRepository
 
 
@@ -31,6 +33,44 @@ class IssuedToken:
         if self.refresh_token is not None:
             body["refresh_token"] = self.refresh_token
         return body
+
+
+def _encode_access_token(
+    encoder: JWTEncoder, user_id: Any | None, client_id: str | None, scopes: list[str], ttl: int
+) -> tuple[str, str]:
+    access_token = encoder.encode(
+        {
+            "sub": None if user_id is None else str(user_id),
+            "client_id": client_id,
+            "scopes": list(scopes),
+            "token_type": "access",
+        },
+        ttl_seconds=ttl,
+    )
+    return access_token, encoder.decode(access_token, verify_exp=False)["jti"]
+
+
+def _refreshed_scopes(record: RefreshTokenRecord | None, scopes: list[str] | None) -> list[str]:
+    if record is None or not record.active:
+        raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
+    if scopes is None:
+        return list(record.scopes)
+    if set(scopes) - set(record.scopes):
+        raise InvalidGrant("Requested scopes exceed those of the original grant.")
+    return list(scopes)
+
+
+def _introspection(record: AccessTokenRecord, claims: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "active": True,
+        "scope": " ".join(record.scopes),
+        "client_id": record.client_id,
+        "sub": claims.get("sub"),
+        "token_type": "Bearer",
+        "exp": claims.get("exp"),
+        "iat": claims.get("iat"),
+        "jti": claims["jti"],
+    }
 
 
 class TokenService:
@@ -79,17 +119,7 @@ class TokenService:
     ) -> IssuedToken:
         self._maybe_purge()
         ttl = self.access_ttl if ttl is None else ttl
-        sub = None if user_id is None else str(user_id)
-        access_token = self.encoder.encode(
-            {
-                "sub": sub,
-                "client_id": client_id,
-                "scopes": list(scopes),
-                "token_type": "access",
-            },
-            ttl_seconds=ttl,
-        )
-        jti = self.encoder.decode(access_token, verify_exp=False)["jti"]
+        access_token, jti = _encode_access_token(self.encoder, user_id, client_id, scopes, ttl)
         self.repository.store_access_token(
             jti=jti,
             user_id=user_id,
@@ -137,15 +167,7 @@ class TokenService:
 
     def refresh(self, refresh_token: str, scopes: list[str] | None = None) -> IssuedToken:
         record = self.repository.find_refresh_token(refresh_token)
-        if record is None or not record.active:
-            raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
-
-        new_scopes = list(record.scopes)
-        if scopes is not None:
-            widened = set(scopes) - set(record.scopes)
-            if widened:
-                raise InvalidGrant("Requested scopes exceed those of the original grant.")
-            new_scopes = list(scopes)
+        new_scopes = _refreshed_scopes(record, scopes)
 
         # Rotate: revoke the previous access + refresh pair before minting a new one.
         self.repository.revoke_access_token(record.access_jti)
@@ -176,14 +198,121 @@ class TokenService:
             claims = self.authenticate(access_token)
         except InvalidToken:
             return {"active": False}
-        record = self.repository.find_access_token(claims["jti"])
-        return {
-            "active": True,
-            "scope": " ".join(record.scopes),
-            "client_id": record.client_id,
-            "sub": claims.get("sub"),
-            "token_type": "Bearer",
-            "exp": claims.get("exp"),
-            "iat": claims.get("iat"),
-            "jti": claims["jti"],
-        }
+        return _introspection(self.repository.find_access_token(claims["jti"]), claims)
+
+
+class AsyncTokenService:
+    def __init__(
+        self,
+        encoder: JWTEncoder,
+        repository: Any,
+        access_ttl: int = 3600,
+        refresh_ttl: int = 1209600,
+        personal_access_ttl: int = 31536000,
+        purge_interval: int = 300,
+    ) -> None:
+        self.encoder = encoder
+        self.repository = repository
+        self.access_ttl = access_ttl
+        self.refresh_ttl = refresh_ttl
+        self.personal_access_ttl = personal_access_ttl
+        self._purge_interval = purge_interval
+        self._last_purge = time.time()
+
+    async def _maybe_purge(self) -> None:
+        now = time.time()
+        if now - self._last_purge >= self._purge_interval:
+            self._last_purge = now
+            await resolve(self.repository.purge_expired())
+
+    async def issue(
+        self,
+        *,
+        user_id: Any | None,
+        client_id: str | None,
+        scopes: list[str],
+        with_refresh: bool = False,
+        ttl: int | None = None,
+        name: str | None = None,
+        personal_access: bool = False,
+    ) -> IssuedToken:
+        await self._maybe_purge()
+        ttl = self.access_ttl if ttl is None else ttl
+        access_token, jti = _encode_access_token(self.encoder, user_id, client_id, scopes, ttl)
+        await resolve(
+            self.repository.store_access_token(
+                jti=jti,
+                user_id=user_id,
+                client_id=client_id,
+                scopes=list(scopes),
+                expires_at=time.time() + ttl,
+                name=name,
+                personal_access=personal_access,
+            )
+        )
+        refresh_token = None
+        if with_refresh:
+            refresh_token = secrets.token_urlsafe(48)
+            await resolve(
+                self.repository.store_refresh_token(
+                    token_id=refresh_token,
+                    access_jti=jti,
+                    user_id=user_id,
+                    client_id=client_id,
+                    scopes=list(scopes),
+                    expires_at=time.time() + self.refresh_ttl,
+                )
+            )
+        return IssuedToken(
+            access_token=access_token,
+            token_type="Bearer",
+            expires_in=ttl,
+            scopes=list(scopes),
+            jti=jti,
+            refresh_token=refresh_token,
+        )
+
+    async def create_personal_access_token(
+        self, *, user_id: Any, name: str, scopes: list[str], ttl: int | None = None
+    ) -> IssuedToken:
+        return await self.issue(
+            user_id=user_id,
+            client_id=None,
+            scopes=scopes,
+            ttl=self.personal_access_ttl if ttl is None else ttl,
+            name=name,
+            personal_access=True,
+        )
+
+    async def refresh(self, refresh_token: str, scopes: list[str] | None = None) -> IssuedToken:
+        record = await resolve(self.repository.find_refresh_token(refresh_token))
+        new_scopes = _refreshed_scopes(record, scopes)
+        if not await resolve(self.repository.revoke_refresh_token(record.token_id)):
+            raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
+        await resolve(self.repository.revoke_access_token(record.access_jti))
+        return await self.issue(
+            user_id=record.user_id,
+            client_id=record.client_id,
+            scopes=new_scopes,
+            with_refresh=True,
+        )
+
+    async def authenticate(self, access_token: str) -> dict[str, Any]:
+        claims = self.encoder.decode(access_token)
+        record = await resolve(self.repository.find_access_token(claims.get("jti", "")))
+        if record is None or not record.active:
+            raise InvalidToken("The access token has been revoked or is unknown.")
+        return claims
+
+    async def revoke_access(self, jti: str) -> bool:
+        return await resolve(self.repository.revoke_access_token(jti))
+
+    async def revoke_refresh(self, token_id: str) -> bool:
+        return await resolve(self.repository.revoke_refresh_token(token_id))
+
+    async def introspect(self, access_token: str) -> dict[str, Any]:
+        try:
+            claims = await self.authenticate(access_token)
+        except InvalidToken:
+            return {"active": False}
+        return _introspection(await resolve(self.repository.find_access_token(claims["jti"])), claims)

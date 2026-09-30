@@ -5,6 +5,7 @@ from typing import Any, Callable
 from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 
+from .concurrency import call
 from .exceptions import AuthError, InsufficientScope, InvalidToken
 from .guards.guard import AuthContext
 from .manager import AuthManager
@@ -23,7 +24,7 @@ def get_auth_manager(request: Request) -> AuthManager:
     return manager
 
 
-def current_context(
+async def current_context(
     request: Request,
     token: str | None = Depends(_bearer),
     manager: AuthManager = Depends(get_auth_manager),
@@ -33,15 +34,15 @@ def current_context(
     The default guard decides the mechanism: guards that implement
     ``authenticate(request)`` (session driver) read the request/cookie state,
     everything else takes the bearer-token path. Route code is identical either
-    way.
+    way. Async guards are awaited; sync guards run in the threadpool.
     """
     guard = manager.guard()
     authenticate = getattr(guard, "authenticate", None)
     if authenticate is not None:
-        return authenticate(request)
+        return await call(authenticate, request)
     if not token:
         raise InvalidToken("Not authenticated.")
-    return guard.user_from_token(token)
+    return await call(guard.user_from_token, token)
 
 
 def current_user(context: AuthContext = Depends(current_context)) -> Any:
@@ -51,7 +52,7 @@ def current_user(context: AuthContext = Depends(current_context)) -> Any:
     return context.user
 
 
-def optional_user(
+async def optional_user(
     request: Request,
     token: str | None = Depends(_bearer),
     manager: AuthManager = Depends(get_auth_manager),
@@ -61,10 +62,10 @@ def optional_user(
     authenticate = getattr(guard, "authenticate", None)
     try:
         if authenticate is not None:
-            return authenticate(request).user
+            return (await call(authenticate, request)).user
         if not token:
             return None
-        return guard.user_from_token(token).user
+        return (await call(guard.user_from_token, token)).user
     except AuthError:
         return None
 

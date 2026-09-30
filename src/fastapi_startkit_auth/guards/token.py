@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import Request
 
 from ..apitokens.manager import ApiTokenManager
 from ..exceptions import InvalidToken
-from ..providers.base import UserProvider
+from ..concurrency import resolve
+from ..providers.base import UserProvider, user_is_active
 from .guard import AuthContext
 
 
@@ -44,15 +47,45 @@ class TokenGuard:
             # Orphaned token (user deleted): revoke it, fail generically.
             self._tokens.revoke(record.id)
             raise InvalidToken("The API token is invalid.")
+        if not user_is_active(self.provider, user):
+            raise InvalidToken("The API token is invalid.")
         return AuthContext(user=user, scopes=list(record.abilities))
 
     def _extract(self, request: Request) -> str | None:
-        raw = request.headers.get(self.header)
-        if raw is None:
+        return _extract_token(request, self.header)
+
+
+def _extract_token(request: Request, header: str) -> str | None:
+    raw = request.headers.get(header)
+    if raw is None:
+        return None
+    if header.lower() == "authorization":
+        scheme, _, value = raw.partition(" ")
+        if scheme.lower() != "bearer":
             return None
-        if self.header.lower() == "authorization":
-            scheme, _, value = raw.partition(" ")
-            if scheme.lower() != "bearer":
-                return None
-            return value.strip()
-        return raw.strip()
+        return value.strip()
+    return raw.strip()
+
+
+class AsyncTokenGuard:
+    def __init__(self, name: str, tokens: Any, provider: Any, header: str = "Authorization") -> None:
+        self.name = name
+        self._tokens = tokens
+        self.provider = provider
+        self.header = header
+
+    async def authenticate(self, request: Request) -> AuthContext:
+        token = _extract_token(request, self.header)
+        if not token:
+            raise InvalidToken("Not authenticated.")
+        return await self.user_from_token(token)
+
+    async def user_from_token(self, access_token: str) -> AuthContext:
+        record = await resolve(self._tokens.verify(access_token))
+        user = await resolve(self.provider.retrieve_by_id(record.user_id))
+        if user is None:
+            await resolve(self._tokens.revoke(record.id))
+            raise InvalidToken("The API token is invalid.")
+        if not user_is_active(self.provider, user):
+            raise InvalidToken("The API token is invalid.")
+        return AuthContext(user=user, scopes=list(record.abilities))
