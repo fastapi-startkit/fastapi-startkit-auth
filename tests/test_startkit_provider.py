@@ -74,7 +74,14 @@ def test_provider_publishes_cors_stub_under_the_auth_key(startkit_module):
     provider.register()
 
     assert provider.provider_key == "auth"  # `provider:publish -p auth`
-    assert app.published_resources == {"auth": {str(CORS_STUB): "config/cors.py"}}
+    migrations = sorted((CORS_STUB.parent / "migrations").glob("*.py"))
+    assert len(migrations) == 5
+    assert app.published_resources == {
+        "auth": {
+            str(CORS_STUB): "config/cors.py",
+            **{str(stub): f"databases/migrations/{stub.name}" for stub in migrations},
+        }
+    }
     published_source = next(iter(app.published_resources["auth"]))
     assert Path(published_source).is_file()
 

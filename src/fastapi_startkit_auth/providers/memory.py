@@ -4,6 +4,7 @@ import secrets
 from typing import Any
 
 from ..security.hashing import BcryptHasher, Hasher
+from .fields import ActiveCheck, active_check
 
 
 class InMemoryUserProvider:
@@ -20,11 +21,15 @@ class InMemoryUserProvider:
         id_field: str = "id",
         username_field: str = "email",
         password_field: str = "password",
+        password_key: str | None = None,
+        is_active: ActiveCheck = None,
     ) -> None:
         self._hasher = hasher or BcryptHasher()
         self._id_field = id_field
         self._username_field = username_field
         self._password_field = password_field
+        self._password_key = password_key or password_field
+        self._is_active = active_check(is_active)
         self._users: dict[Any, dict[str, Any]] = {}
         # Precomputed hash for constant-time verification of absent users.
         self._dummy_hash = self._hasher.make(secrets.token_urlsafe(16))
@@ -52,7 +57,7 @@ class InMemoryUserProvider:
     def validate_credentials(self, user: dict[str, Any], credentials: dict[str, Any]) -> bool:
         if user is None:
             return False
-        supplied = credentials.get(self._password_field)
+        supplied = credentials.get(self._password_key)
         if supplied is None:
             return False
         return self._hasher.verify(supplied, user.get(self._password_field, ""))
@@ -63,6 +68,9 @@ class InMemoryUserProvider:
 
     def get_identifier(self, user: dict[str, Any]) -> Any:
         return user[self._id_field]
+
+    def is_active(self, user: dict[str, Any]) -> bool:
+        return self._is_active(user)
 
     def update_password(self, user: dict[str, Any], plain: str) -> None:
         stored = self._users[user[self._id_field]]

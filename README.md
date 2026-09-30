@@ -119,13 +119,64 @@ class AuthConfig:
 | driver | meaning |
 | --- | --- |
 | `masoniteorm` / `orm` / `model` | wrap a model exposing `find(id)` and `where(field, value).first()` |
+| `async_model` | same, for async ORMs where `find`, `first()` and `save()` are coroutines |
 | `memory` | in-memory dict store (`users=[...]`) — great for tests/demos |
 | `instance` | pass a ready `UserProvider` via `{"instance": ...}` |
 | `factory` | pass a zero-arg callable returning a `UserProvider` |
 
 Any object implementing the `UserProvider` protocol
 (`retrieve_by_id`, `retrieve_by_credentials`, `validate_credentials`,
-`get_identifier`, `update_password`) is a valid provider.
+`get_identifier`, `update_password`) is a valid provider. Any of its methods
+may be `async def`; one async method is enough for `AuthManager` to pick the
+async guards, grants and broker. The sync classes refuse an awaitable result
+with `AsyncMisconfiguration` instead of treating it as truthy.
+
+Model-backed providers also accept `password_key` (the credentials key holding
+the plaintext password, default: `password_field`) and `is_active` (a boolean
+attribute name or a `callable(user) -> bool`; inactive users cannot log in,
+authenticate, refresh or exchange a code, and introspect as inactive). The
+`async_model` driver also takes an `async def` hook; the sync drivers reject
+one at construction:
+
+```python
+providers = {
+    "users": {
+        "driver": "async_model",
+        "model": User,
+        "password_field": "hashed_password",
+        "password_key": "password",
+        "is_active": "is_active",
+    }
+}
+```
+
+### Async stores
+
+With an async provider or store, `AuthManager` builds the async guards, grants,
+token service and password broker automatically (use the `AsyncAuth` facade for
+session login/logout). Sessions, API tokens and OAuth tokens can be persisted
+with an async driver — an asyncpg pool, an aiosqlite connection, or a zero-arg
+(async) factory returning one:
+
+```python
+session = {"store": "async_sql", "connection": pool}
+api_tokens = {"store": "async_sql", "connection": pool}
+tokens = {"store": "async_sql", "connection": pool}
+```
+
+The tables come from the migrations published by `AuthServiceProvider`
+(`provider:publish -p auth`), or from each store's `await create_table()`.
+
+Supported backends are PostgreSQL (asyncpg) and SQLite (aiosqlite). Any other
+driver can be plugged in by passing an object with async `execute` (returning
+the affected row count), `fetch_one` and `fetch_all` methods using `?`
+placeholders. The stores use only portable SQL (no `RETURNING`); the DDL in
+`create_table()` uses `CREATE ... IF NOT EXISTS`, so on MySQL use the
+migrations instead.
+
+In mixed setups (async stores with a sync provider or a sync session store),
+the sync calls — lookups, bcrypt, `is_active` hooks, `SqlSessionStore` in
+`SessionMiddleware` — run in the threadpool, never on the event loop.
 
 ## HTTP endpoints
 
@@ -191,6 +242,9 @@ uv sync --group dev
 uv run pytest
 uv run ruff check .
 ```
+
+The async store and flow tests run on aiosqlite; set `TEST_ASYNCPG_DSN` to a
+disposable Postgres database to also run them on asyncpg (CI does).
 
 Or with pip:
 

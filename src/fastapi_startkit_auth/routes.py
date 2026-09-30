@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Form, Request, Response
 from pydantic import BaseModel
 
 from .clients.models import Client
+from .concurrency import call
 from .dependencies import current_user, get_auth_manager
 from .exceptions import (
     InvalidClient,
@@ -120,8 +121,12 @@ def build_router(prefix: str = "") -> APIRouter:
         if grant_type == "password":
             if client_id:
                 _authenticate_client(manager, client_id, client_secret, "password")
-            issued = manager.password_grant().handle(
-                username=username or "", password=password or "", scopes=scopes, client_id=client_id
+            issued = await call(
+                manager.password_grant().handle,
+                username=username or "",
+                password=password or "",
+                scopes=scopes,
+                client_id=client_id,
             )
             return issued.to_response()
 
@@ -129,16 +134,16 @@ def build_router(prefix: str = "") -> APIRouter:
             if not client_id:
                 raise InvalidClient("client_id is required for the client_credentials grant.")
             client = _authenticate_client(manager, client_id, client_secret, "client_credentials")
-            return manager.client_credentials_grant().handle(client=client, scopes=scopes).to_response()
+            issued = await call(manager.client_credentials_grant().handle, client=client, scopes=scopes)
+            return issued.to_response()
 
         if grant_type == "refresh_token":
             if not refresh_token:
                 raise InvalidRequest("refresh_token is required.")
             if client_id:
                 _authenticate_client(manager, client_id, client_secret, "refresh_token")
-            return manager.refresh_grant().handle(
-                refresh_token=refresh_token, scopes=scopes or None
-            ).to_response()
+            issued = await call(manager.refresh_grant().handle, refresh_token=refresh_token, scopes=scopes or None)
+            return issued.to_response()
 
         if grant_type == "authorization_code":
             if not code:
@@ -152,7 +157,8 @@ def build_router(prefix: str = "") -> APIRouter:
             if client.confidential:
                 _authenticate_client(manager, client_id, client_secret, "authorization_code")
                 client_authenticated = True
-            issued = manager.authorization_code_grant().handle(
+            issued = await call(
+                manager.authorization_code_grant().handle,
                 client=client,
                 code=code,
                 redirect_uri=redirect_uri,
@@ -171,8 +177,8 @@ def build_router(prefix: str = "") -> APIRouter:
         scope: str | None = Form(None),
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
-        issued = manager.password_grant().handle(
-            username=username, password=password, scopes=_scopes(scope), client_id=None
+        issued = await call(
+            manager.password_grant().handle, username=username, password=password, scopes=_scopes(scope), client_id=None
         )
         return issued.to_response()
 
@@ -189,7 +195,8 @@ def build_router(prefix: str = "") -> APIRouter:
         if body.redirect_uri is not None and not client.allows_redirect(body.redirect_uri):
             raise InvalidRequest("redirect_uri is not registered for this client.")
         user_id = manager.guard().provider.get_identifier(user)
-        code = manager.authorization_code_grant().issue_code(
+        code = await call(
+            manager.authorization_code_grant().issue_code,
             client=client,
             user_id=user_id,
             scopes=_scopes(body.scope),
@@ -216,7 +223,7 @@ def build_router(prefix: str = "") -> APIRouter:
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
         _require_authenticated_client(manager, request, client_id, client_secret)
-        return manager.token_service.introspect(token)
+        return await manager.introspect(token)
 
     # --- revocation (RFC 7009) ----------------------------------------
     @router.post("/oauth/revoke")
@@ -232,13 +239,13 @@ def build_router(prefix: str = "") -> APIRouter:
         svc = manager.token_service
         # Try refresh first when hinted; otherwise decode as an access token.
         if token_type_hint == "refresh_token":
-            svc.revoke_refresh(token)
+            await call(svc.revoke_refresh, token)
             return {"revoked": True}
         try:
             claims = svc.encoder.decode(token, verify_exp=False)
-            svc.revoke_access(claims.get("jti", ""))
+            await call(svc.revoke_access, claims.get("jti", ""))
         except Exception:
-            svc.revoke_refresh(token)
+            await call(svc.revoke_refresh, token)
         return {"revoked": True}
 
     # --- client management --------------------------------------------
@@ -276,9 +283,7 @@ def build_router(prefix: str = "") -> APIRouter:
         ]
 
     @router.delete("/oauth/clients/{client_id}", status_code=204)
-    async def delete_client(
-        client_id: str, manager: AuthManager = Depends(get_auth_manager)
-    ) -> Response:
+    async def delete_client(client_id: str, manager: AuthManager = Depends(get_auth_manager)) -> Response:
         manager.client_repository.delete(client_id)
         return Response(status_code=204)
 
@@ -290,8 +295,8 @@ def build_router(prefix: str = "") -> APIRouter:
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
         user_id = manager.guard().provider.get_identifier(user)
-        issued = manager.token_service.create_personal_access_token(
-            user_id=user_id, name=body.name, scopes=body.scopes
+        issued = await call(
+            manager.token_service.create_personal_access_token, user_id=user_id, name=body.name, scopes=body.scopes
         )
         return {
             "jti": issued.jti,
@@ -307,11 +312,9 @@ def build_router(prefix: str = "") -> APIRouter:
         manager: AuthManager = Depends(get_auth_manager),
     ) -> list[dict[str, Any]]:
         user_id = manager.guard().provider.get_identifier(user)
-        records = manager.token_service.repository.list_access_tokens(user_id, personal_access=True)
+        records = await call(manager.token_service.repository.list_access_tokens, user_id, personal_access=True)
         return [
-            {"jti": r.jti, "name": r.name, "scopes": r.scopes, "revoked": r.revoked}
-            for r in records
-            if not r.revoked
+            {"jti": r.jti, "name": r.name, "scopes": r.scopes, "revoked": r.revoked} for r in records if not r.revoked
         ]
 
     @router.delete("/oauth/personal-access-tokens/{jti}", status_code=204)
@@ -320,11 +323,11 @@ def build_router(prefix: str = "") -> APIRouter:
         user=Depends(current_user),
         manager: AuthManager = Depends(get_auth_manager),
     ) -> Response:
-        record = manager.token_service.repository.find_access_token(jti)
+        record = await call(manager.token_service.repository.find_access_token, jti)
         user_id = manager.guard().provider.get_identifier(user)
         # Only allow owners to revoke their own tokens.
         if record is not None and record.user_id == user_id:
-            manager.token_service.revoke_access(jti)
+            await call(manager.token_service.revoke_access, jti)
         return Response(status_code=204)
 
     # --- password reset -----------------------------------------------
@@ -344,7 +347,7 @@ def build_router(prefix: str = "") -> APIRouter:
         # still enforces the throttle server-side (no extra notification is sent).
         generic = {"status": "If that account exists, a reset link has been sent."}
         try:
-            token = manager.broker().send_reset_link(body.email)
+            token = await call(manager.broker().send_reset_link, body.email)
         except (InvalidGrant, ThrottleException):
             return generic
         if manager.debug_expose_reset_token:
@@ -356,7 +359,7 @@ def build_router(prefix: str = "") -> APIRouter:
         body: ResetPasswordRequest,
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
-        manager.broker().reset(body.email, body.token, body.password)
+        await call(manager.broker().reset, body.email, body.token, body.password)
         return {"status": "password reset"}
 
     return router

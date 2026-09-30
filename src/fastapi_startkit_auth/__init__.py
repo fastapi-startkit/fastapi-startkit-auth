@@ -7,11 +7,13 @@ Passport while staying idiomatic FastAPI:
 """
 from __future__ import annotations
 
-from .apitokens.manager import ApiTokenManager, NewApiToken
+from .apitokens.async_sql import AsyncSqlApiTokenRepository
+from .apitokens.manager import ApiTokenManager, AsyncApiTokenManager, NewApiToken
 from .apitokens.models import ApiTokenRecord
 from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
 from .apitokens.sql import SqlApiTokenRepository
 from .application import Application
+from .concurrency import AsyncMisconfiguration
 from .config import AuthConfig
 from .dependencies import (
     current_user,
@@ -28,18 +30,25 @@ from .exceptions import (
     InvalidSession,
     InvalidToken,
 )
-from .facade import Auth
-from .guards.session import SessionGuard
-from .guards.token import TokenGuard
+from .facade import AsyncAuth, Auth
+from .guards.guard import AsyncPassportGuard, PassportGuard
+from .guards.session import AsyncSessionGuard, SessionGuard
+from .guards.token import AsyncTokenGuard, TokenGuard
 from .manager import AuthManager
 from .middleware.csrf import CsrfMiddleware
 from .middleware.session import SessionMiddleware
+from .passwords.broker import AsyncPasswordBroker, PasswordBroker
 from .provider import AuthProvider
+from .providers.memory import InMemoryUserProvider
+from .providers.model import AsyncModelUserProvider, ModelUserProvider
+from .sessions.async_sql import AsyncSqlSessionStore
 from .sessions.models import SessionRecord
 from .sessions.sql import SqlSessionStore
 from .sessions.store import InMemorySessionStore, SessionStore
+from .tokens.async_sql import AsyncSqlTokenRepository
+from .tokens.service import AsyncTokenService, TokenService
 
-__version__ = "0.2.0"
+__version__ = "0.4.0"
 
 __all__ = (
     "AuthConfig",
@@ -51,6 +60,7 @@ __all__ = (
     "require_scopes",
     "require_abilities",
     "AuthError",
+    "AsyncMisconfiguration",
     "InvalidGrant",
     "InvalidClient",
     "InvalidToken",
@@ -73,6 +83,22 @@ __all__ = (
     "ApiTokenRepository",
     "InMemoryApiTokenRepository",
     "SqlApiTokenRepository",
+    "AsyncAuth",
+    "PassportGuard",
+    "AsyncPassportGuard",
+    "AsyncSessionGuard",
+    "AsyncTokenGuard",
+    "AsyncApiTokenManager",
+    "PasswordBroker",
+    "AsyncPasswordBroker",
+    "InMemoryUserProvider",
+    "ModelUserProvider",
+    "AsyncModelUserProvider",
+    "TokenService",
+    "AsyncTokenService",
+    "AsyncSqlSessionStore",
+    "AsyncSqlApiTokenRepository",
+    "AsyncSqlTokenRepository",
 )
 
 

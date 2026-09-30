@@ -36,3 +36,6 @@ class AuthServiceProvider(Provider):
         cors_stub = str(_PUBLISHABLE / "cors.py")
         self.merge_config_from(cors_stub, "cors")
         self.publishes({cors_stub: "config/cors.py"})
+        self.publishes(
+            {str(stub): f"databases/migrations/{stub.name}" for stub in sorted((_PUBLISHABLE / "migrations").glob("*.py"))}
+        )

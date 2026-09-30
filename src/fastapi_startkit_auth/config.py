@@ -30,7 +30,9 @@ class AuthConfig:
     # --- session settings (cookie auth; used by {"driver": "session"} guards) --
     # ``store`` selects the backend: "memory" (default), "sql" (requires a
     # DB-API ``connection`` — or zero-arg factory — plus optional ``table``),
-    # or "instance" (a ready-made SessionStore under ``instance``). Overrides
+    # "async_sql" (an asyncpg pool/connection or aiosqlite connection — or
+    # zero-arg, possibly async, factory — under ``connection``), or
+    # "instance" (a ready-made SessionStore under ``instance``). Overrides
     # are merged over these defaults, so partial dicts are fine.
     # ``purge_interval`` throttles the SQL store's opportunistic purge-on-create
     # (seconds between sweeps of expired rows).
@@ -64,7 +66,8 @@ class AuthConfig:
     # --- API token settings (opaque tokens; used by {"driver": "token"} guards) --
     # ``store`` selects the backend like the session block: "memory" (default),
     # "sql" (requires a DB-API ``connection`` — or zero-arg factory — plus
-    # optional ``table``), or "instance" (a ready-made ApiTokenRepository under
+    # optional ``table``), "async_sql" (async driver ``connection``, as for
+    # sessions), or "instance" (a ready-made ApiTokenRepository under
     # ``instance``). ``header`` is where the guard reads the token: the default
     # "Authorization" expects a ``Bearer`` scheme, any other name is read raw.
     # ``ttl`` is the default token lifetime in seconds (None = non-expiring);
@@ -74,6 +77,14 @@ class AuthConfig:
         "header": "Authorization",
         "ttl": None,
         "purge_interval": 300,
+    }
+
+    # --- OAuth token store (access/refresh tokens and authorization codes) --
+    # "memory" (default), "async_sql" (an asyncpg pool/connection, aiosqlite
+    # connection, or zero-arg factory under ``connection``; optional
+    # ``access_table``/``refresh_table``/``codes_table``), or "instance".
+    tokens: dict[str, Any] = {
+        "store": "memory",
     }
 
     # --- JWT / token settings (overridable) ----------------------------
