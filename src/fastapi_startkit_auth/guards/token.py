@@ -6,8 +6,8 @@ from fastapi import Request
 
 from ..apitokens.manager import ApiTokenManager
 from ..exceptions import InvalidToken
-from ..concurrency import resolve
-from ..providers.base import UserProvider, user_is_active
+from ..concurrency import call, ensure_sync
+from ..providers.base import UserProvider, user_is_active, user_is_active_async
 from .guard import AuthContext
 
 
@@ -41,11 +41,11 @@ class TokenGuard:
         return self.user_from_token(token)
 
     def user_from_token(self, access_token: str) -> AuthContext:
-        record = self._tokens.verify(access_token)
-        user = self.provider.retrieve_by_id(record.user_id)
+        record = ensure_sync(self._tokens.verify(access_token), "The API token manager's verify")
+        user = ensure_sync(self.provider.retrieve_by_id(record.user_id), "The user provider's retrieve_by_id")
         if user is None:
             # Orphaned token (user deleted): revoke it, fail generically.
-            self._tokens.revoke(record.id)
+            ensure_sync(self._tokens.revoke(record.id), "The API token manager's revoke")
             raise InvalidToken("The API token is invalid.")
         if not user_is_active(self.provider, user):
             raise InvalidToken("The API token is invalid.")
@@ -81,11 +81,11 @@ class AsyncTokenGuard:
         return await self.user_from_token(token)
 
     async def user_from_token(self, access_token: str) -> AuthContext:
-        record = await resolve(self._tokens.verify(access_token))
-        user = await resolve(self.provider.retrieve_by_id(record.user_id))
+        record = await call(self._tokens.verify, access_token)
+        user = await call(self.provider.retrieve_by_id, record.user_id)
         if user is None:
-            await resolve(self._tokens.revoke(record.id))
+            await call(self._tokens.revoke, record.id)
             raise InvalidToken("The API token is invalid.")
-        if not user_is_active(self.provider, user):
+        if not await user_is_active_async(self.provider, user):
             raise InvalidToken("The API token is invalid.")
         return AuthContext(user=user, scopes=list(record.abilities))

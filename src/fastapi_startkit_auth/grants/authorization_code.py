@@ -5,11 +5,12 @@ import time
 from typing import Any
 
 from ..clients.models import Client
-from ..concurrency import resolve
+from ..concurrency import call
 from ..exceptions import InvalidGrant, InvalidRequest
 from ..tokens.service import IssuedToken, TokenService
 from ..tokens.models import AuthorizationCode
 from .pkce import verify_pkce
+from .refresh import ensure_owner_active, ensure_owner_active_async
 
 
 def _new_code(client: Client, code_challenge: str | None) -> str:
@@ -52,9 +53,10 @@ class AuthorizationCodeGrant:
     ``handle`` exchanges the resulting single-use code for tokens.
     """
 
-    def __init__(self, token_service: TokenService, code_ttl: int = 600) -> None:
+    def __init__(self, token_service: TokenService, code_ttl: int = 600, user_provider: Any = None) -> None:
         self._tokens = token_service
         self._code_ttl = code_ttl
+        self._users = user_provider
 
     def issue_code(
         self,
@@ -90,6 +92,7 @@ class AuthorizationCodeGrant:
     ) -> IssuedToken:
         record = self._tokens.repository.pull_auth_code(code)
         _validate_exchange(record, client, redirect_uri, code_verifier, client_authenticated)
+        ensure_owner_active(self._users, record.user_id)
         return self._tokens.issue(
             user_id=record.user_id,
             client_id=client.id,
@@ -99,9 +102,10 @@ class AuthorizationCodeGrant:
 
 
 class AsyncAuthorizationCodeGrant:
-    def __init__(self, token_service: Any, code_ttl: int = 600) -> None:
+    def __init__(self, token_service: Any, code_ttl: int = 600, user_provider: Any = None) -> None:
         self._tokens = token_service
         self._code_ttl = code_ttl
+        self._users = user_provider
 
     async def issue_code(
         self,
@@ -114,17 +118,16 @@ class AsyncAuthorizationCodeGrant:
         code_challenge_method: str | None,
     ) -> str:
         code = _new_code(client, code_challenge)
-        await resolve(
-            self._tokens.repository.store_auth_code(
-                code=code,
-                client_id=client.id,
-                user_id=user_id,
-                scopes=scopes,
-                redirect_uri=redirect_uri,
-                code_challenge=code_challenge,
-                code_challenge_method=code_challenge_method,
-                expires_at=time.time() + self._code_ttl,
-            )
+        await call(
+            self._tokens.repository.store_auth_code,
+            code=code,
+            client_id=client.id,
+            user_id=user_id,
+            scopes=scopes,
+            redirect_uri=redirect_uri,
+            code_challenge=code_challenge,
+            code_challenge_method=code_challenge_method,
+            expires_at=time.time() + self._code_ttl,
         )
         return code
 
@@ -137,13 +140,13 @@ class AsyncAuthorizationCodeGrant:
         code_verifier: str | None,
         client_authenticated: bool = False,
     ) -> IssuedToken:
-        record = await resolve(self._tokens.repository.pull_auth_code(code))
+        record = await call(self._tokens.repository.pull_auth_code, code)
         _validate_exchange(record, client, redirect_uri, code_verifier, client_authenticated)
-        return await resolve(
-            self._tokens.issue(
-                user_id=record.user_id,
-                client_id=client.id,
-                scopes=record.scopes,
-                with_refresh=True,
-            )
+        await ensure_owner_active_async(self._users, record.user_id)
+        return await call(
+            self._tokens.issue,
+            user_id=record.user_id,
+            client_id=client.id,
+            scopes=record.scopes,
+            with_refresh=True,
         )

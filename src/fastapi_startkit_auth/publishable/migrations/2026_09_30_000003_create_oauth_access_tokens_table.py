@@ -14,6 +14,7 @@ class CreateOauthAccessTokensTable(Migration):
             table.boolean("personal_access").default(False)
             table.double("created_at")
             table.index("user_id")
+            table.index("expires_at")
 
     async def down(self):
         await self.schema.drop("oauth_access_tokens")

@@ -18,23 +18,31 @@ Release notes are also published on
   - `AsyncPassportGuard`, `AsyncSessionGuard`, `AsyncTokenGuard`,
     `AsyncTokenService`, `AsyncApiTokenManager`, `AsyncPasswordBroker`, the
     `Async*Grant` variants and the `AsyncAuth` facade.
-  - `AuthManager` picks the async variant automatically when the provider or a
-    store is async; sync configurations keep getting the sync classes.
+  - `AuthManager` picks the async variant automatically when any provider
+    method or store method is async; sync configurations keep getting the sync
+    classes. Sync collaborators used from the async classes run in the
+    threadpool.
   - `"async_sql"` stores for sessions (`AsyncSqlSessionStore`), personal API
     tokens (`AsyncSqlApiTokenRepository`) and a new `AuthConfig.tokens` block
     for OAuth access/refresh tokens and authorization codes
     (`AsyncSqlTokenRepository`). They accept an asyncpg pool/connection, an
-    aiosqlite connection, or a zero-arg (async) factory. Refresh tokens and
-    authorization codes are stored as SHA-256 hashes; refresh revocation and
-    code redemption are atomic.
+    aiosqlite connection, or a zero-arg (async) factory. Supported backends are
+    PostgreSQL and SQLite. Refresh tokens and authorization codes are stored as
+    SHA-256 hashes; refresh revocation and code redemption are atomic and use
+    only portable SQL. Expired rows are purged via `expires_at` indexes.
   - `fastapi-startkit` migrations for the five tables, published to
     `databases/migrations/` by `AuthServiceProvider`.
 - `password_key` provider option: the credentials key holding the plaintext
   password, separate from the model column `password_field` (e.g.
   `password_key="password"`, `password_field="hashed_password"`). Defaults to
   `password_field`.
-- `is_active` provider option (attribute name or callable). Inactive users are
-  rejected by the password grant, `Auth.attempt`, and every guard.
+- `is_active` provider option (attribute name or callable; `async def` with
+  the `async_model` driver). Inactive or deleted users are rejected by the
+  password grant, the refresh and authorization-code grants, `Auth.attempt` /
+  `AsyncAuth.attempt` and every guard, and introspect as inactive.
+- `AsyncMisconfiguration`: raised when a sync guard, grant, broker or `Auth`
+  receives an awaitable from a provider or store, so a half-async provider
+  fails closed. Sync providers reject an `async def` `is_active` hook.
 - CI runs the asyncpg store and flow tests against a Postgres service.
 - `Typing :: Typed` classifier (the package already ships `py.typed`).
 

@@ -4,7 +4,7 @@ import asyncio
 import secrets
 from typing import Any, Callable
 
-from ..concurrency import resolve
+from ..concurrency import call, ensure_sync
 from ..exceptions import InvalidGrant, ThrottleException
 from ..providers.base import UserProvider
 from ..security.hashing import BcryptHasher, Hasher
@@ -47,7 +47,7 @@ class PasswordBroker:
         self._notifier = notifier
 
     def _find_user(self, email: str):
-        return self._users.retrieve_by_credentials(_lookup(email))
+        return ensure_sync(self._users.retrieve_by_credentials(_lookup(email)), "retrieve_by_credentials")
 
     def send_reset_link(self, email: str) -> str:
         user = self._find_user(email)
@@ -76,7 +76,7 @@ class PasswordBroker:
         user = self._find_user(email)
         if user is None:
             raise InvalidGrant(_UNKNOWN_EMAIL)
-        self._users.update_password(user, new_password)
+        ensure_sync(self._users.update_password(user, new_password), "update_password")
         self._repo.delete(email)
         return True
 
@@ -99,33 +99,33 @@ class AsyncPasswordBroker:
         self._notifier = notifier
 
     async def _find_user(self, email: str) -> Any:
-        return await resolve(self._users.retrieve_by_credentials(_lookup(email)))
+        return await call(self._users.retrieve_by_credentials, _lookup(email))
 
     async def send_reset_link(self, email: str) -> str:
         user = await self._find_user(email)
         if user is None:
             await asyncio.to_thread(self._hasher.make, secrets.token_urlsafe(40))
             raise InvalidGrant(_UNKNOWN_EMAIL)
-        if await resolve(self._repo.recently_created(email, self._throttle_seconds)):
+        if await call(self._repo.recently_created, email, self._throttle_seconds):
             raise ThrottleException(_THROTTLED)
         token = secrets.token_urlsafe(40)
-        await resolve(self._repo.create(email, await asyncio.to_thread(self._hasher.make, token)))
+        await call(self._repo.create, email, await asyncio.to_thread(self._hasher.make, token))
         if self._notifier is not None:
-            await resolve(self._notifier(email, token))
+            await call(self._notifier, email, token)
         return token
 
     async def reset(self, email: str, token: str, new_password: str) -> bool:
-        record = await resolve(self._repo.find(email))
+        record = await call(self._repo.find, email)
         if record is None:
             raise InvalidGrant(_INVALID_TOKEN)
         if record.age() > self._expire_minutes * 60:
-            await resolve(self._repo.delete(email))
+            await call(self._repo.delete, email)
             raise InvalidGrant(_EXPIRED_TOKEN)
         if not await asyncio.to_thread(self._hasher.verify, token, record.hashed_token):
             raise InvalidGrant(_INVALID_TOKEN)
         user = await self._find_user(email)
         if user is None:
             raise InvalidGrant(_UNKNOWN_EMAIL)
-        await resolve(self._users.update_password(user, new_password))
-        await resolve(self._repo.delete(email))
+        await call(self._users.update_password, user, new_password)
+        await call(self._repo.delete, email)
         return True

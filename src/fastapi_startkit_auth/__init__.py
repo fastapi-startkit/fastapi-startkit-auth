@@ -13,6 +13,7 @@ from .apitokens.models import ApiTokenRecord
 from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
 from .apitokens.sql import SqlApiTokenRepository
 from .application import Application
+from .concurrency import AsyncMisconfiguration
 from .config import AuthConfig
 from .dependencies import (
     current_user,
@@ -59,6 +60,7 @@ __all__ = (
     "require_scopes",
     "require_abilities",
     "AuthError",
+    "AsyncMisconfiguration",
     "InvalidGrant",
     "InvalidClient",
     "InvalidToken",

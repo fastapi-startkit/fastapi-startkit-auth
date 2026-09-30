@@ -4,7 +4,7 @@ import asyncio
 import secrets
 from typing import Any
 
-from ..concurrency import resolve
+from ..concurrency import call, resolve
 from ..security.hashing import BcryptHasher, Hasher
 from .fields import ActiveCheck, active_check, read_attribute, write_attribute
 
@@ -87,10 +87,12 @@ class AsyncModelUserProvider:
         self._username_field = username_field
         self._password_field = password_field
         self._password_key = password_key or password_field
-        self._is_active = active_check(is_active)
-        self._dummy_hash = self._hasher.make(secrets.token_urlsafe(16))
+        self._is_active = active_check(is_active, allow_async=True)
+        self._dummy_hash: str | None = None
 
     async def dummy_verify(self) -> None:
+        if self._dummy_hash is None:
+            self._dummy_hash = await asyncio.to_thread(self._hasher.make, secrets.token_urlsafe(16))
         await asyncio.to_thread(self._hasher.verify, "invalid", self._dummy_hash)
 
     async def retrieve_by_id(self, identifier: Any) -> Any | None:
@@ -114,8 +116,8 @@ class AsyncModelUserProvider:
     def get_identifier(self, user: Any) -> Any:
         return read_attribute(user, self._id_field)
 
-    def is_active(self, user: Any) -> bool:
-        return self._is_active(user)
+    async def is_active(self, user: Any) -> bool:
+        return bool(await call(self._is_active, user))
 
     async def update_password(self, user: Any, plain: str) -> None:
         hashed = await asyncio.to_thread(self._hasher.make, plain)

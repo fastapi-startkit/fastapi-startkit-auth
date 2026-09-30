@@ -5,11 +5,11 @@ from typing import Any
 from fastapi import Depends, Request
 
 from .dependencies import get_auth_manager
-from .concurrency import resolve
+from .concurrency import call, ensure_sync
 from .exceptions import AuthError
 from .guards.session import AsyncSessionGuard, SessionGuard
 from .manager import AuthManager
-from .providers.base import user_is_active
+from .providers.base import user_is_active, user_is_active_async
 from .sessions.models import SessionRecord
 
 
@@ -57,13 +57,14 @@ class Auth:
         """Log in by credentials; ``False`` on any failure (no enumeration)."""
         session_guard = self._session_guard(guard)
         provider = session_guard.provider
-        user = provider.retrieve_by_credentials(credentials)
+        user = ensure_sync(provider.retrieve_by_credentials(credentials), "retrieve_by_credentials")
         if user is None:
             dummy = getattr(provider, "dummy_verify", None)
             if dummy is not None:
-                dummy()
+                ensure_sync(dummy(), "dummy_verify")
             return False
-        if not provider.validate_credentials(user, credentials) or not user_is_active(provider, user):
+        valid = ensure_sync(provider.validate_credentials(user, credentials), "validate_credentials")
+        if not valid or not user_is_active(provider, user):
             return False
         session_guard.login(self._request, user)
         return True
@@ -105,7 +106,7 @@ class Auth:
     def _resolve_user(self, user_or_id: Any, session_guard: SessionGuard) -> Any:
         if not isinstance(user_or_id, (int, str)):
             return user_or_id
-        user = session_guard.provider.retrieve_by_id(user_or_id)
+        user = ensure_sync(session_guard.provider.retrieve_by_id(user_or_id), "retrieve_by_id")
         if user is None:
             raise ValueError(f"No user with id {user_or_id!r} in guard {session_guard.name!r}'s provider.")
         return user
@@ -126,32 +127,32 @@ class AsyncAuth:
     async def login(self, user_or_id: Any, guard: str | None = None) -> SessionRecord:
         session_guard = self._session_guard(guard)
         user = await self._resolve_user(user_or_id, session_guard)
-        return await resolve(session_guard.login(self._request, user))
+        return await call(session_guard.login, self._request, user)
 
     async def attempt(self, credentials: dict[str, Any], guard: str | None = None) -> bool:
         session_guard = self._session_guard(guard)
         provider = session_guard.provider
-        user = await resolve(provider.retrieve_by_credentials(credentials))
+        user = await call(provider.retrieve_by_credentials, credentials)
         if user is None:
             dummy = getattr(provider, "dummy_verify", None)
             if dummy is not None:
-                await resolve(dummy())
+                await call(dummy)
             return False
-        valid = await resolve(provider.validate_credentials(user, credentials))
-        if not valid or not user_is_active(provider, user):
+        valid = await call(provider.validate_credentials, user, credentials)
+        if not valid or not await user_is_active_async(provider, user):
             return False
-        await resolve(session_guard.login(self._request, user))
+        await call(session_guard.login, self._request, user)
         return True
 
     async def logout(self, guard: str | None = None) -> None:
-        await resolve(self._session_guard(guard).logout(self._request))
+        await call(self._session_guard(guard).logout, self._request)
 
     async def user(self, guard: str | None = None) -> Any | None:
         authenticate = getattr(self.guard(guard), "authenticate", None)
         if authenticate is None:
             return None
         try:
-            return (await resolve(authenticate(self._request))).user
+            return (await call(authenticate, self._request)).user
         except AuthError:
             return None
 
@@ -176,7 +177,7 @@ class AsyncAuth:
     async def _resolve_user(self, user_or_id: Any, session_guard: Any) -> Any:
         if not isinstance(user_or_id, (int, str)):
             return user_or_id
-        user = await resolve(session_guard.provider.retrieve_by_id(user_or_id))
+        user = await call(session_guard.provider.retrieve_by_id, user_or_id)
         if user is None:
             raise ValueError(f"No user with id {user_or_id!r} in guard {session_guard.name!r}'s provider.")
         return user

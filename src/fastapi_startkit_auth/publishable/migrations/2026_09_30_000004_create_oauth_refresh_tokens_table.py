@@ -12,6 +12,7 @@ class CreateOauthRefreshTokensTable(Migration):
             table.double("expires_at").nullable()
             table.boolean("revoked").default(False)
             table.double("created_at")
+            table.index("expires_at")
 
     async def down(self):
         await self.schema.drop("oauth_refresh_tokens")

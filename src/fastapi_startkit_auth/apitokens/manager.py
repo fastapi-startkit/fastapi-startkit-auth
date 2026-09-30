@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ..concurrency import resolve
+from ..concurrency import call
 from ..exceptions import InvalidToken
 from .models import ApiTokenRecord
 from .repository import ApiTokenRepository, generate_token_secret, hash_token_secret
@@ -65,9 +65,7 @@ class NewApiToken:
     def __repr__(self) -> str:
         # The dataclass auto-repr would leak the live secret into logs,
         # error-tracker locals, and test output; show only the id half.
-        return (
-            f"NewApiToken(record={self.record!r}, plain_text='{self.record.id}|***redacted***')"
-        )
+        return f"NewApiToken(record={self.record!r}, plain_text='{self.record.id}|***redacted***')"
 
 
 class ApiTokenManager:
@@ -115,7 +113,9 @@ class ApiTokenManager:
         """
         self._maybe_purge()
         secret = generate_token_secret()
-        record = self.repository.create(**_creation_fields(user_id, secret, name, abilities, expires_at, self._default_ttl))
+        record = self.repository.create(
+            **_creation_fields(user_id, secret, name, abilities, expires_at, self._default_ttl)
+        )
         return NewApiToken(record=record, plain_text=f"{record.id}|{secret}")
 
     def verify(self, token: str) -> ApiTokenRecord:
@@ -153,7 +153,7 @@ class AsyncApiTokenManager:
         if now - self._last_purge < self._purge_interval:
             return
         self._last_purge = now
-        await resolve(self.repository.purge_expired())
+        await call(self.repository.purge_expired)
 
     async def create(
         self,
@@ -165,21 +165,21 @@ class AsyncApiTokenManager:
         await self._maybe_purge()
         secret = generate_token_secret()
         fields = _creation_fields(user_id, secret, name, abilities, expires_at, self._default_ttl)
-        record = await resolve(self.repository.create(**fields))
+        record = await call(self.repository.create, **fields)
         return NewApiToken(record=record, plain_text=f"{record.id}|{secret}")
 
     async def verify(self, token: str) -> ApiTokenRecord:
         token_id, secret = _split_token(token)
-        record = await resolve(self.repository.find(token_id)) if token_id else None
+        record = await call(self.repository.find, token_id) if token_id else None
         _check_secret(record, secret)
-        await resolve(self.repository.touch(record.id))
+        await call(self.repository.touch, record.id)
         return record
 
     async def revoke(self, token_id: str) -> bool:
-        return await resolve(self.repository.revoke(token_id))
+        return await call(self.repository.revoke, token_id)
 
     async def revoke_all(self, user_id: Any) -> int:
-        return await resolve(self.repository.revoke_all_for_user(user_id))
+        return await call(self.repository.revoke_all_for_user, user_id)
 
     async def tokens_for(self, user_id: Any) -> list[ApiTokenRecord]:
-        return await resolve(self.repository.list_for_user(user_id))
+        return await call(self.repository.list_for_user, user_id)

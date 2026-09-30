@@ -7,7 +7,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from ..concurrency import resolve
+from ..concurrency import call
 from ..sessions.state import FORGET_KEY, LOADED_ID_KEY, SESSION_KEY
 from ..sessions.store import SessionStore
 
@@ -54,9 +54,9 @@ class SessionMiddleware:
 
         state = scope.setdefault("state", {})
         incoming_id = self._read_cookie(scope)
-        record = await resolve(self.store.find(incoming_id)) if incoming_id else None
+        record = await call(self.store.find, incoming_id) if incoming_id else None
         if record is not None:
-            await resolve(self.store.touch(record.id))
+            await call(self.store.touch, record.id)
         state[SESSION_KEY] = record
         state[LOADED_ID_KEY] = incoming_id
         state[FORGET_KEY] = False
@@ -111,8 +111,4 @@ class SessionMiddleware:
             )
         else:
             return None
-        return next(
-            value.decode("latin-1")
-            for name, value in response.raw_headers
-            if name == b"set-cookie"
-        )
+        return next(value.decode("latin-1") for name, value in response.raw_headers if name == b"set-cookie")

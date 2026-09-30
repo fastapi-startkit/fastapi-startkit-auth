@@ -126,13 +126,17 @@ class AuthConfig:
 
 Any object implementing the `UserProvider` protocol
 (`retrieve_by_id`, `retrieve_by_credentials`, `validate_credentials`,
-`get_identifier`, `update_password`) is a valid provider. Its lookup and
-password methods may be `async def`.
+`get_identifier`, `update_password`) is a valid provider. Any of its methods
+may be `async def`; one async method is enough for `AuthManager` to pick the
+async guards, grants and broker. The sync classes refuse an awaitable result
+with `AsyncMisconfiguration` instead of treating it as truthy.
 
 Model-backed providers also accept `password_key` (the credentials key holding
 the plaintext password, default: `password_field`) and `is_active` (a boolean
-attribute name or a `callable(user) -> bool`; inactive users cannot log in or
-authenticate):
+attribute name or a `callable(user) -> bool`; inactive users cannot log in,
+authenticate, refresh or exchange a code, and introspect as inactive). The
+`async_model` driver also takes an `async def` hook; the sync drivers reject
+one at construction:
 
 ```python
 providers = {
@@ -162,6 +166,17 @@ tokens = {"store": "async_sql", "connection": pool}
 
 The tables come from the migrations published by `AuthServiceProvider`
 (`provider:publish -p auth`), or from each store's `await create_table()`.
+
+Supported backends are PostgreSQL (asyncpg) and SQLite (aiosqlite). Any other
+driver can be plugged in by passing an object with async `execute` (returning
+the affected row count), `fetch_one` and `fetch_all` methods using `?`
+placeholders. The stores use only portable SQL (no `RETURNING`); the DDL in
+`create_table()` uses `CREATE ... IF NOT EXISTS`, so on MySQL use the
+migrations instead.
+
+In mixed setups (async stores with a sync provider or a sync session store),
+the sync calls — lookups, bcrypt, `is_active` hooks, `SqlSessionStore` in
+`SessionMiddleware` — run in the threadpool, never on the event loop.
 
 ## HTTP endpoints
 

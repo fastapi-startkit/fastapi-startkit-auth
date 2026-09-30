@@ -10,9 +10,7 @@ from .models import AccessTokenRecord, AuthorizationCode, RefreshTokenRecord
 
 _ACCESS_COLUMNS = "jti, user_id, client_id, scopes, expires_at, revoked, name, personal_access, created_at"
 _REFRESH_COLUMNS = "token_hash, access_jti, user_id, client_id, scopes, expires_at, revoked, created_at"
-_CODE_COLUMNS = (
-    "code_hash, client_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method, expires_at"
-)
+_CODE_COLUMNS = "code_hash, client_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method, expires_at"
 
 
 def token_table_ddl(
@@ -32,6 +30,7 @@ def token_table_ddl(
         "personal_access BOOLEAN NOT NULL DEFAULT FALSE, "
         "created_at DOUBLE PRECISION NOT NULL)",
         f"CREATE INDEX IF NOT EXISTS {access_table}_user_id_index ON {access_table} (user_id)",
+        f"CREATE INDEX IF NOT EXISTS {access_table}_expires_at_index ON {access_table} (expires_at)",
         f"CREATE TABLE IF NOT EXISTS {refresh_table} ("
         "token_hash VARCHAR(64) PRIMARY KEY, "
         "access_jti VARCHAR(255) NOT NULL, "
@@ -41,6 +40,7 @@ def token_table_ddl(
         "expires_at DOUBLE PRECISION, "
         "revoked BOOLEAN NOT NULL DEFAULT FALSE, "
         "created_at DOUBLE PRECISION NOT NULL)",
+        f"CREATE INDEX IF NOT EXISTS {refresh_table}_expires_at_index ON {refresh_table} (expires_at)",
         f"CREATE TABLE IF NOT EXISTS {codes_table} ("
         "code_hash VARCHAR(64) PRIMARY KEY, "
         "client_id VARCHAR(255) NOT NULL, "
@@ -221,10 +221,12 @@ class AsyncSqlTokenRepository:
         return record
 
     async def pull_auth_code(self, code: str) -> AuthorizationCode | None:
-        row = await self._db.fetch_one(
-            f"DELETE FROM {self._codes} WHERE code_hash = ? RETURNING {_CODE_COLUMNS}", (_digest(code),)
-        )
+        code_hash = _digest(code)
+        row = await self._db.fetch_one(f"SELECT {_CODE_COLUMNS} FROM {self._codes} WHERE code_hash = ?", (code_hash,))
         if row is None:
+            return None
+        # Only the caller whose DELETE removes the row redeems it, so concurrent replays get one winner.
+        if await self._db.execute(f"DELETE FROM {self._codes} WHERE code_hash = ?", (code_hash,)) != 1:
             return None
         return AuthorizationCode(
             code=code,

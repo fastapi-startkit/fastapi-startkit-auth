@@ -216,9 +216,14 @@ async def test_provider_is_active_accepts_attribute_or_callable():
     by_callable = AsyncModelUserProvider(AsyncUser, hasher=HASHER, is_active=lambda user: user.id == 2)
     default = AsyncModelUserProvider(AsyncUser, hasher=HASHER)
     active, inactive = AsyncUser.rows[1], AsyncUser.rows[2]
-    assert (by_attribute.is_active(active), by_attribute.is_active(inactive)) == (True, False)
-    assert (by_callable.is_active(active), by_callable.is_active(inactive)) == (False, True)
-    assert default.is_active(inactive) is True
+    async def by_coroutine_check(user):
+        return user.id == 1
+
+    by_coroutine = AsyncModelUserProvider(AsyncUser, hasher=HASHER, is_active=by_coroutine_check)
+    assert (await by_attribute.is_active(active), await by_attribute.is_active(inactive)) == (True, False)
+    assert (await by_callable.is_active(active), await by_callable.is_active(inactive)) == (False, True)
+    assert (await by_coroutine.is_active(active), await by_coroutine.is_active(inactive)) == (True, False)
+    assert await default.is_active(inactive) is True
 
 
 async def test_provider_update_password_awaits_save():
