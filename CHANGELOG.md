@@ -7,6 +7,26 @@ Release notes are also published on
 
 ## [Unreleased]
 
+### Added
+
+- `Client.provider` (and `register(provider=...)`) binds an OAuth client to a
+  user provider. `AuthManager.owner_provider(client_id)` resolves it, falling
+  back to the default guard's provider.
+- `AuthManager.warm_up()` and `AsyncModelUserProvider.warm_up()`, run from the
+  app lifespan by `AuthProvider`, precompute the dummy hash at startup.
+
+### Fixed
+
+- Refresh, authorization-code exchange and introspection re-check the token
+  owner against the provider of the issuing client instead of always using the
+  default guard's provider. The password grant authenticates against the
+  client's provider, and `/oauth/authorize` rejects a client bound to another
+  provider.
+- `AsyncModelUserProvider.is_active` only uses the threadpool for a sync
+  callable hook. Attribute checks and `async def` hooks run inline.
+- The first unknown-user login no longer pays an extra bcrypt hash to create
+  the dummy hash.
+
 ## [0.4.0]
 
 ### Added

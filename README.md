@@ -150,6 +150,19 @@ providers = {
 }
 ```
 
+### Multiple providers
+
+With more than one provider, register each OAuth client with the provider whose
+users it serves (Laravel Passport's `provider` column). The password grant then
+authenticates against that provider, and refresh, code exchange and
+introspection re-check the token owner against it. A client without a
+`provider` uses the default guard's provider, and `/oauth/authorize` rejects a
+client bound to a different provider with `unauthorized_client`:
+
+```python
+client, secret = manager.client_repository.register(name="admin-panel", provider="admins")
+```
+
 ### Async stores
 
 With an async provider or store, `AuthManager` builds the async guards, grants,
@@ -177,6 +190,13 @@ migrations instead.
 In mixed setups (async stores with a sync provider or a sync session store),
 the sync calls — lookups, bcrypt, `is_active` hooks, `SqlSessionStore` in
 `SessionMiddleware` — run in the threadpool, never on the event loop.
+An `is_active` attribute name or `async def` hook runs inline, since neither
+blocks.
+
+`AuthProvider` warms the providers up when the app starts (`await
+manager.warm_up()`), so `AsyncModelUserProvider` computes its dummy hash off the
+event loop before the first request. A login for an unknown user then costs
+one bcrypt verify, the same as a wrong password.
 
 ## HTTP endpoints
 

@@ -4,7 +4,7 @@ import asyncio
 import secrets
 from typing import Any
 
-from ..concurrency import call, resolve
+from ..concurrency import call, is_coroutine_callable, resolve
 from ..security.hashing import BcryptHasher, Hasher
 from .fields import ActiveCheck, active_check, read_attribute, write_attribute
 
@@ -88,11 +88,18 @@ class AsyncModelUserProvider:
         self._password_field = password_field
         self._password_key = password_key or password_field
         self._is_active = active_check(is_active, allow_async=True)
+        # Only a user-supplied sync hook may block; attribute reads and
+        # coroutine hooks are cheap to run on the event loop.
+        self._offload_is_active = callable(is_active) and not is_coroutine_callable(is_active)
         self._dummy_hash: str | None = None
 
-    async def dummy_verify(self) -> None:
+    async def warm_up(self) -> None:
+        """Compute the dummy hash ahead of the first absent-user login."""
         if self._dummy_hash is None:
             self._dummy_hash = await asyncio.to_thread(self._hasher.make, secrets.token_urlsafe(16))
+
+    async def dummy_verify(self) -> None:
+        await self.warm_up()
         await asyncio.to_thread(self._hasher.verify, "invalid", self._dummy_hash)
 
     async def retrieve_by_id(self, identifier: Any) -> Any | None:
@@ -117,7 +124,9 @@ class AsyncModelUserProvider:
         return read_attribute(user, self._id_field)
 
     async def is_active(self, user: Any) -> bool:
-        return bool(await call(self._is_active, user))
+        if self._offload_is_active:
+            return bool(await call(self._is_active, user))
+        return bool(await resolve(self._is_active(user)))
 
     async def update_password(self, user: Any, plain: str) -> None:
         hashed = await asyncio.to_thread(self._hasher.make, plain)

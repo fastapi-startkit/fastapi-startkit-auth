@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -20,12 +21,26 @@ async def _auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict(), headers=headers)
 
 
+def _warm_up_on_startup(app: FastAPI, manager: AuthManager) -> None:
+    # Wrap rather than replace the lifespan so an app-supplied one still runs.
+    inner = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(application: Any):
+        await manager.warm_up()
+        async with inner(application) as state:
+            yield state
+
+    app.router.lifespan_context = lifespan
+
+
 class AuthProvider:
     """Registers the auth stack onto a FastAPI application.
 
     Instantiated with an :class:`AuthConfig`, it builds the :class:`AuthManager`,
     stores it on ``app.state.auth_manager`` (where the dependencies read it),
-    mounts the OAuth2 router, and installs the OAuth2 error handler.
+    mounts the OAuth2 router, installs the OAuth2 error handler, and warms the
+    providers up when the app starts.
     """
 
     def __init__(self, config: Any, prefix: str = "") -> None:
@@ -37,6 +52,7 @@ class AuthProvider:
         app.state.auth_manager = self.manager
         app.include_router(build_router(prefix=self.prefix))
         app.add_exception_handler(AuthError, _auth_error_handler)
+        _warm_up_on_startup(app, self.manager)
         if self.manager.has_session_guard():
             session = self.manager.session_config
             if self.manager.spa_enabled():
