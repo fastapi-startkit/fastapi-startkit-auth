@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import hashlib
-import sqlite3
 import warnings
 from types import SimpleNamespace
 
@@ -18,9 +17,9 @@ from fastapi_startkit_auth import (
     AuthConfig,
     AuthProvider,
     SessionGuard,
-    SqlSessionStore,
     current_user,
 )
+from fastapi_startkit_auth.sessions.store import InMemorySessionStore
 from fastapi_startkit_auth.concurrency import AsyncMisconfiguration
 from fastapi_startkit_auth.grants import AsyncPasswordGrant, PasswordGrant, RefreshTokenGrant
 from fastapi_startkit_auth.providers.base import user_is_active
@@ -86,7 +85,7 @@ ASYNC_PROVIDER = {"driver": "async_model", "model": Account, "is_active": accoun
 
 
 def make_config(connection=None, *, default_guard="api", provider=None, session=None):
-    stores = {"store": "async_sql", "connection": connection} if connection is not None else {"store": "memory"}
+    stores = {"store": "orm", "connection": connection} if connection is not None else {"store": "memory"}
 
     class Config(AuthConfig):
         key = KEY
@@ -117,10 +116,6 @@ async def build(connection=None, **kwargs):
         return {"ok": await auth.attempt(payload, guard="web")}
 
     manager = application.auth
-    for store in (manager.session_store, manager.api_tokens.repository, manager.token_repository):
-        create_table = getattr(store, "create_table", None)
-        if create_table is not None and asyncio.iscoroutinefunction(create_table):
-            await create_table()
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=application.api), base_url="https://testserver")
     return client, manager
 
@@ -143,15 +138,15 @@ def remove_owner(accounts, how):
 # --- async is_active hook ------------------------------------------------
 
 
-async def test_async_is_active_hook_denies_password_grant(async_connection):
-    client, _ = await build(async_connection)
+async def test_async_is_active_hook_denies_password_grant(orm_database):
+    client, _ = await build(orm_database)
     async with client:
         assert (await password_token(client, email="off@example.com")).json()["error"] == "invalid_grant"
         assert (await password_token(client)).status_code == 200
 
 
-async def test_async_is_active_hook_denies_passport_guard(async_connection, accounts):
-    client, _ = await build(async_connection)
+async def test_async_is_active_hook_denies_passport_guard(orm_database, accounts):
+    client, _ = await build(orm_database)
     async with client:
         token = (await password_token(client)).json()["access_token"]
         assert (await client.get("/me", headers=bearer(token))).status_code == 200
@@ -159,8 +154,8 @@ async def test_async_is_active_hook_denies_passport_guard(async_connection, acco
         assert (await client.get("/me", headers=bearer(token))).status_code == 401
 
 
-async def test_async_is_active_hook_denies_token_guard(async_connection, accounts):
-    client, manager = await build(async_connection, default_guard="tokens")
+async def test_async_is_active_hook_denies_token_guard(orm_database, accounts):
+    client, manager = await build(orm_database, default_guard="tokens")
     async with client:
         issued = await manager.api_tokens.create(1, name="cli")
         assert (await client.get("/me", headers=bearer(issued.plain_text))).status_code == 200
@@ -168,8 +163,8 @@ async def test_async_is_active_hook_denies_token_guard(async_connection, account
         assert (await client.get("/me", headers=bearer(issued.plain_text))).status_code == 401
 
 
-async def test_async_is_active_hook_denies_attempt_and_session_guard(async_connection, accounts):
-    client, _ = await build(async_connection, default_guard="web")
+async def test_async_is_active_hook_denies_attempt_and_session_guard(orm_database, accounts):
+    client, _ = await build(orm_database, default_guard="web")
     async with client:
         denied = await client.post("/login", json={"email": "off@example.com", "password": "secret"})
         assert denied.json() == {"ok": False}
@@ -236,8 +231,8 @@ def test_sync_grant_and_attempt_fail_closed_on_async_validate():
 
 
 @pytest.mark.parametrize("how", ["deactivated", "deleted"])
-async def test_refresh_grant_denied_when_owner_is_gone(async_connection, accounts, how):
-    client, _ = await build(async_connection)
+async def test_refresh_grant_denied_when_owner_is_gone(orm_database, accounts, how):
+    client, _ = await build(orm_database)
     async with client:
         refresh_token = (await password_token(client)).json()["refresh_token"]
         remove_owner(accounts, how)
@@ -245,8 +240,8 @@ async def test_refresh_grant_denied_when_owner_is_gone(async_connection, account
         assert denied.json()["error"] == "invalid_grant"
 
 
-async def test_refresh_denied_for_inactive_owner_does_not_consume_the_token(async_connection, accounts):
-    client, _ = await build(async_connection)
+async def test_refresh_denied_for_inactive_owner_does_not_consume_the_token(orm_database, accounts):
+    client, _ = await build(orm_database)
     async with client:
         refresh_token = (await password_token(client)).json()["refresh_token"]
         accounts[1].active = False
@@ -257,8 +252,8 @@ async def test_refresh_denied_for_inactive_owner_does_not_consume_the_token(asyn
 
 
 @pytest.mark.parametrize("how", ["deactivated", "deleted"])
-async def test_authorization_code_denied_when_owner_is_gone(async_connection, accounts, how):
-    client, manager = await build(async_connection)
+async def test_authorization_code_denied_when_owner_is_gone(orm_database, accounts, how):
+    client, manager = await build(orm_database)
     async with client:
         spa, _ = manager.client_repository.register(
             name="spa", redirect_uris=["https://app/cb"], confidential=False, grant_types=["authorization_code"]
@@ -283,8 +278,8 @@ async def test_authorization_code_denied_when_owner_is_gone(async_connection, ac
 
 
 @pytest.mark.parametrize("how", ["deactivated", "deleted"])
-async def test_introspect_reports_gone_owner_as_inactive(async_connection, accounts, how):
-    client, manager = await build(async_connection)
+async def test_introspect_reports_gone_owner_as_inactive(orm_database, accounts, how):
+    client, manager = await build(orm_database)
     async with client:
         server, secret = manager.client_repository.register(name="rs", grant_types=["client_credentials"])
         token = (await password_token(client)).json()["access_token"]
@@ -351,7 +346,7 @@ class SyncAccount:
         return Query()
 
 
-class RecordingSessionStore(SqlSessionStore):
+class RecordingSessionStore(InMemorySessionStore):
     def create(self, **kwargs):
         record_thread()
         return super().create(**kwargs)
@@ -370,12 +365,12 @@ def sync_is_active(user):
     return True
 
 
-async def test_sync_provider_and_session_store_never_run_on_the_loop(async_connection):
+async def test_sync_provider_and_session_store_never_run_on_the_loop(orm_database):
     SyncAccount.rows = {1: SyncAccount(id=1, email="ada@example.com", password=HASHER.make("secret"))}
     provider = ModelUserProvider(SyncAccount, hasher=RecordingHasher(rounds=4), is_active=sync_is_active)
-    sessions = RecordingSessionStore(sqlite3.connect(":memory:", check_same_thread=False))
+    sessions = RecordingSessionStore()
     client, _ = await build(
-        async_connection,
+        orm_database,
         provider={"driver": "instance", "instance": provider},
         session={"store": "instance", "instance": sessions},
     )

@@ -5,7 +5,6 @@ round-trip, and are parametrized over BOTH session stores. The package ships no
 login/logout routes — the app-style routes wired here are the consuming app's
 responsibility, exactly as documented.
 """
-import sqlite3
 import warnings
 
 import pytest
@@ -95,15 +94,9 @@ def make_client(session=None, guards=None):
     return TestClient(application.api, base_url="https://testserver")
 
 
-SQL_SESSION = {
-    "store": "sql",
-    "connection": lambda: sqlite3.connect(":memory:", check_same_thread=False),
-}
-
-
-@pytest.fixture(params=["memory", "sql"])
-def client(request):
-    return make_client(session=SQL_SESSION if request.param == "sql" else None)
+@pytest.fixture
+def client():
+    return make_client()
 
 
 def set_cookie_header(response):
@@ -283,16 +276,13 @@ def test_manager_without_session_guard_adds_no_middleware():
 
 
 def test_session_store_config_selects_implementation():
-    from fastapi_startkit_auth.sessions import SqlSessionStore
-
     assert isinstance(_manager().session_store, InMemorySessionStore)
-    assert isinstance(_manager(session=dict(SQL_SESSION)).session_store, SqlSessionStore)
     custom = InMemorySessionStore()
     manager = _manager(session={"store": "instance", "instance": custom})
     assert manager.session_store is custom
     with pytest.raises(ValueError, match="Unknown session store"):
         _manager(session={"store": "redis"}).session_store
-    with pytest.raises(ValueError, match='requires a "connection"'):
+    with pytest.raises(ValueError, match='"orm"'):
         _manager(session={"store": "sql"}).session_store
 
 

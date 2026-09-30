@@ -28,13 +28,12 @@ class AuthConfig:
     passwords: dict[str, dict[str, Any]] = {}
 
     # --- session settings (cookie auth; used by {"driver": "session"} guards) --
-    # ``store`` selects the backend: "memory" (default), "sql" (requires a
-    # DB-API ``connection`` — or zero-arg factory — plus optional ``table``),
-    # "async_sql" (an asyncpg pool/connection or aiosqlite connection — or
-    # zero-arg, possibly async, factory — under ``connection``), or
+    # ``store`` selects the backend: "memory" (default), "orm" (the
+    # fastapi-startkit ORM and the published migrations; optional ORM
+    # ``connection`` name, default connection otherwise), or
     # "instance" (a ready-made SessionStore under ``instance``). Overrides
     # are merged over these defaults, so partial dicts are fine.
-    # ``purge_interval`` throttles the SQL store's opportunistic purge-on-create
+    # ``purge_interval`` throttles the ORM store's opportunistic purge-on-create
     # (seconds between sweeps of expired rows).
     session: dict[str, Any] = {
         "store": "memory",
@@ -65,9 +64,7 @@ class AuthConfig:
 
     # --- API token settings (opaque tokens; used by {"driver": "token"} guards) --
     # ``store`` selects the backend like the session block: "memory" (default),
-    # "sql" (requires a DB-API ``connection`` — or zero-arg factory — plus
-    # optional ``table``), "async_sql" (async driver ``connection``, as for
-    # sessions), or "instance" (a ready-made ApiTokenRepository under
+    # "orm" (as for sessions), or "instance" (a ready-made ApiTokenRepository under
     # ``instance``). ``header`` is where the guard reads the token: the default
     # "Authorization" expects a ``Bearer`` scheme, any other name is read raw.
     # ``ttl`` is the default token lifetime in seconds (None = non-expiring);
@@ -80,9 +77,7 @@ class AuthConfig:
     }
 
     # --- OAuth token store (access/refresh tokens and authorization codes) --
-    # "memory" (default), "async_sql" (an asyncpg pool/connection, aiosqlite
-    # connection, or zero-arg factory under ``connection``; optional
-    # ``access_table``/``refresh_table``/``codes_table``), or "instance".
+    # "memory" (default), "orm" (as for sessions), or "instance".
     tokens: dict[str, Any] = {
         "store": "memory",
     }

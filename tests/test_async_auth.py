@@ -91,9 +91,9 @@ def make_config(connection, *, default_guard="api", sent=None):
         }
         providers = {"users": USER_PROVIDER}
         passwords = {"users": {"provider": "users", "table": "password_reset_tokens", "expire": 60, "throttle": 0}}
-        session = {"store": "async_sql", "connection": connection}
-        api_tokens = {"store": "async_sql", "connection": connection}
-        tokens = {"store": "async_sql", "connection": connection}
+        session = {"store": "orm", "connection": connection}
+        api_tokens = {"store": "orm", "connection": connection}
+        tokens = {"store": "orm", "connection": connection}
         spa = {"enabled": True}
         password_reset_notifier = staticmethod(lambda email, token: sent.append((email, token))) if sent is not None else None
 
@@ -142,17 +142,14 @@ async def build(connection, **kwargs):
     application = Application([(AuthProvider, make_config(connection, **kwargs))])
     wire_routes(application.api)
     manager = application.auth
-    await manager.session_store.create_table()
-    await manager.api_tokens.repository.create_table()
-    await manager.token_repository.create_table()
     transport = httpx.ASGITransport(app=application.api)
     client = httpx.AsyncClient(transport=transport, base_url="https://testserver")
     return client, manager
 
 
 @pytest.fixture
-async def app(async_connection):
-    client, manager = await build(async_connection)
+async def app(orm_database):
+    client, manager = await build(orm_database)
     async with client:
         yield client, manager
 
@@ -185,13 +182,19 @@ async def test_manager_selects_async_variants(app):
     assert manager.session_guard_name() == "web"
 
 
-def test_async_sql_store_requires_connection():
+@pytest.mark.parametrize("section", ["session", "api_tokens", "tokens"])
+@pytest.mark.parametrize("removed", ["sql", "async_sql"])
+def test_removed_sql_stores_point_to_the_orm_store(section, removed):
+    from fastapi_startkit_auth.manager import AuthManager
+
     class Config(AuthConfig):
         key = "async-tests-secret-key-32-bytes-minimum!!"
-        tokens = {"store": "async_sql"}
+        providers = {"users": {"driver": "memory", "users": []}}
 
-    with pytest.raises(ValueError, match="requires a \"connection\""):
-        Application([(AuthProvider, Config)])
+    setattr(Config, section, {"store": removed})
+    attribute = {"session": "session_store", "api_tokens": "api_tokens", "tokens": "token_repository"}[section]
+    with pytest.raises(ValueError, match='"orm"'):
+        getattr(AuthManager(Config), attribute)
 
 
 # --- async model provider ------------------------------------------------
@@ -348,8 +351,8 @@ async def test_personal_access_tokens(app):
 
 
 @pytest.fixture
-async def session_app(async_connection):
-    client, manager = await build(async_connection, default_guard="web")
+async def session_app(orm_database):
+    client, manager = await build(orm_database, default_guard="web")
     async with client:
         yield client, manager
 
@@ -403,8 +406,8 @@ async def test_sync_facade_refuses_async_session_guard(session_app):
 # --- token guard (personal API tokens) -----------------------------------
 
 
-async def test_token_guard_with_async_api_tokens(async_connection):
-    client, manager = await build(async_connection, default_guard="tokens")
+async def test_token_guard_with_async_api_tokens(orm_database):
+    client, manager = await build(orm_database, default_guard="tokens")
     async with client:
         issued = await manager.api_tokens.create(1, name="cli", abilities=["read"])
         assert (await client.get("/me", headers=bearer(issued.plain_text))).json()["id"] == 1
@@ -419,9 +422,9 @@ async def test_token_guard_with_async_api_tokens(async_connection):
 # --- password broker -----------------------------------------------------
 
 
-async def test_password_reset_with_async_provider(async_connection):
+async def test_password_reset_with_async_provider(orm_database):
     sent = []
-    client, _ = await build(async_connection, sent=sent)
+    client, _ = await build(orm_database, sent=sent)
     async with client:
         generic = await client.post("/password/email", json={"email": "ada@example.com"})
         assert generic.status_code == 200

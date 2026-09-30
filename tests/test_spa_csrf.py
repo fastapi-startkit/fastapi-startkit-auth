@@ -4,7 +4,6 @@ Runs the axios-shaped flow over HTTPS (Secure cookies) against both session
 stores. The SPA mode is opt-in (``AuthConfig.spa["enabled"]``): the plain
 Phase 1 cookie flow must keep working untouched when it is off.
 """
-import sqlite3
 
 import pytest
 from fastapi import Body, Depends
@@ -91,15 +90,9 @@ def make_client(spa=None, session=None):
     return TestClient(application.api, base_url="https://testserver")
 
 
-SQL_SESSION = {
-    "store": "sql",
-    "connection": lambda: sqlite3.connect(":memory:", check_same_thread=False),
-}
-
-
-@pytest.fixture(params=["memory", "sql"])
-def client(request):
-    return make_client(session=SQL_SESSION if request.param == "sql" else None)
+@pytest.fixture
+def client():
+    return make_client()
 
 
 def csrf_headers(client):

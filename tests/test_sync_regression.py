@@ -1,6 +1,5 @@
 import asyncio
 import inspect
-import sqlite3
 
 import pytest
 from fastapi import Body, Depends
@@ -16,8 +15,8 @@ from fastapi_startkit_auth import (
     PassportGuard,
     PasswordBroker,
     SessionGuard,
-    SqlApiTokenRepository,
-    SqlSessionStore,
+    InMemoryApiTokenRepository,
+    InMemorySessionStore,
     TokenGuard,
     TokenService,
     current_user,
@@ -77,9 +76,6 @@ def users():
 
 
 def sync_config(default_guard="api", sent=None):
-    def connect():
-        return sqlite3.connect(":memory:", check_same_thread=False)
-
     class Config(AuthConfig):
         key = "sync-regression-secret-key-32-bytes!!"
         bcrypt_rounds = 4
@@ -91,8 +87,6 @@ def sync_config(default_guard="api", sent=None):
         }
         providers = {"users": {"driver": "model", "model": SyncUser}}
         passwords = {"users": {"provider": "users", "table": "password_reset_tokens", "expire": 60, "throttle": 0}}
-        session = {"store": "sql", "connection": connect}
-        api_tokens = {"store": "sql", "connection": connect}
         password_reset_notifier = staticmethod(lambda email, token: sent.append((email, token))) if sent is not None else None
 
     return Config
@@ -132,9 +126,9 @@ def test_manager_builds_the_sync_classes():
     assert type(manager.guard("tokens")) is TokenGuard
     assert type(manager.token_service) is TokenService
     assert type(manager.token_repository) is InMemoryTokenRepository
-    assert type(manager.session_store) is SqlSessionStore
+    assert type(manager.session_store) is InMemorySessionStore
     assert type(manager.api_tokens) is ApiTokenManager
-    assert type(manager.api_tokens.repository) is SqlApiTokenRepository
+    assert type(manager.api_tokens.repository) is InMemoryApiTokenRepository
     assert type(manager.password_grant()) is PasswordGrant
     assert type(manager.refresh_grant()) is RefreshTokenGrant
     assert type(manager.client_credentials_grant()) is ClientCredentialsGrant
@@ -180,7 +174,7 @@ def test_passport_flow_is_unchanged():
     assert replay.json()["error"] == "invalid_grant"
 
 
-def test_session_flow_with_sync_sql_store_is_unchanged():
+def test_session_flow_with_sync_store_is_unchanged():
     client, _ = build(default_guard="web")
     assert client.get("/me").status_code == 401
     assert client.post("/login", json={"email": "ada@example.com", "password": "bad"}).status_code == 401
@@ -190,7 +184,7 @@ def test_session_flow_with_sync_sql_store_is_unchanged():
     assert client.get("/me").status_code == 401
 
 
-def test_token_guard_with_sync_sql_repository_is_unchanged():
+def test_token_guard_with_sync_repository_is_unchanged():
     client, manager = build(default_guard="tokens")
     issued = manager.api_tokens.create(1, name="cli")
     assert client.get("/me", headers={"Authorization": f"Bearer {issued.plain_text}"}).json() == {"id": 1}

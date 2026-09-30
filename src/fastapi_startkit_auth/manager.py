@@ -4,10 +4,8 @@ import secrets
 import warnings
 from typing import Any, Callable
 
-from .apitokens.async_sql import AsyncSqlApiTokenRepository
 from .apitokens.manager import ApiTokenManager, AsyncApiTokenManager
 from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
-from .apitokens.sql import SqlApiTokenRepository
 from .clients.repository import InMemoryClientRepository
 from .concurrency import call, has_async_methods
 from .config import AuthConfig, as_config_class
@@ -25,36 +23,22 @@ from .providers.memory import InMemoryUserProvider
 from .providers.model import AsyncModelUserProvider, ModelUserProvider
 from .security.hashing import BcryptHasher
 from .security.jwt import JWTEncoder
-from .sessions.async_sql import AsyncSqlSessionStore
-from .sessions.sql import SqlSessionStore
 from .sessions.store import InMemorySessionStore, SessionStore
-from .tokens.async_sql import AsyncSqlTokenRepository
 from .tokens.repository import InMemoryTokenRepository
 from .tokens.service import AsyncTokenService, TokenService
 
 GuardFactory = Callable[[str, dict[str, Any]], Guard]
 
 
-def _resolve_connection(connection: Any) -> Any:
-    """Return an open DB-API connection from either a connection or a factory.
-
-    A raw connection (e.g. ``sqlite3.Connection``) is itself callable, so we
-    duck-type on ``execute`` — which every SQL store relies on — instead of
-    ``callable()`` to tell an already-open connection apart from a zero-arg
-    factory that produces one.
-    """
-    if hasattr(connection, "execute"):
-        return connection
-    if callable(connection):
-        return connection()
-    return connection
+_REMOVED_STORES = ("sql", "async_sql")
 
 
-def _require_connection(spec: dict[str, Any], section: str) -> Any:
-    connection = spec.get("connection")
-    if connection is None:
-        raise ValueError(f'AuthConfig.{section} with store "{spec.get("store")}" requires a "connection".')
-    return connection
+def _reject_removed_store(kind: str, section: str) -> None:
+    if kind in _REMOVED_STORES:
+        raise ValueError(
+            f'AuthConfig.{section} store "{kind}" was removed: use store "orm" (optional ORM '
+            '"connection" name) after running the published migrations.'
+        )
 
 
 class AuthManager:
@@ -232,20 +216,11 @@ class AuthManager:
         kind = spec.get("store", "memory")
         if kind == "memory":
             return InMemoryApiTokenRepository()
-        if kind == "sql":
-            connection = spec.get("connection")
-            if connection is None:
-                raise ValueError('AuthConfig.api_tokens with store "sql" requires a "connection".')
-            connection = _resolve_connection(connection)
-            return SqlApiTokenRepository(
-                connection,
-                table=spec.get("table", "personal_api_tokens"),
-            )
-        if kind == "async_sql":
-            return AsyncSqlApiTokenRepository(
-                _require_connection(spec, "api_tokens"),
-                table=spec.get("table", "personal_api_tokens"),
-            )
+        if kind == "orm":
+            from .apitokens.orm import OrmApiTokenRepository
+
+            return OrmApiTokenRepository(spec.get("connection"))
+        _reject_removed_store(kind, "api_tokens")
         if kind == "instance":
             return spec["instance"]
         raise ValueError(f"Unknown api_tokens store: {kind!r}")
@@ -267,24 +242,15 @@ class AuthManager:
         idle_ttl = spec.get("idle_ttl")
         if kind == "memory":
             return InMemorySessionStore(idle_ttl=idle_ttl)
-        if kind == "sql":
-            connection = spec.get("connection")
-            if connection is None:
-                raise ValueError('AuthConfig.session with store "sql" requires a "connection".')
-            connection = _resolve_connection(connection)
-            return SqlSessionStore(
-                connection,
-                table=spec.get("table", "sessions"),
+        if kind == "orm":
+            from .sessions.orm import OrmSessionStore
+
+            return OrmSessionStore(
+                spec.get("connection"),
                 idle_ttl=idle_ttl,
                 purge_interval=spec.get("purge_interval", 300),
             )
-        if kind == "async_sql":
-            return AsyncSqlSessionStore(
-                _require_connection(spec, "session"),
-                table=spec.get("table", "sessions"),
-                idle_ttl=idle_ttl,
-                purge_interval=spec.get("purge_interval", 300),
-            )
+        _reject_removed_store(kind, "session")
         if kind == "instance":
             return spec["instance"]
         raise ValueError(f"Unknown session store: {kind!r}")
@@ -294,13 +260,11 @@ class AuthManager:
         kind = spec.get("store", "memory")
         if kind == "memory":
             return InMemoryTokenRepository()
-        if kind == "async_sql":
-            return AsyncSqlTokenRepository(
-                _require_connection(spec, "tokens"),
-                access_table=spec.get("access_table", "oauth_access_tokens"),
-                refresh_table=spec.get("refresh_table", "oauth_refresh_tokens"),
-                codes_table=spec.get("codes_table", "oauth_auth_codes"),
-            )
+        if kind == "orm":
+            from .tokens.orm import OrmTokenRepository
+
+            return OrmTokenRepository(spec.get("connection"))
+        _reject_removed_store(kind, "tokens")
         if kind == "instance":
             return spec["instance"]
         raise ValueError(f"Unknown tokens store: {kind!r}")

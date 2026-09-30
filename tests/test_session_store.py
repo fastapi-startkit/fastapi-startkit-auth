@@ -1,9 +1,8 @@
 """Contract tests for the session stores.
 
-Every test runs against BOTH implementations (in-memory and SQL) through the
-parametrized factory, so the two backends are guaranteed interchangeable.
+Runs against the in-memory store through the factory fixture; the ORM store
+is covered by the same behaviours in test_async_stores.py.
 """
-import sqlite3
 import time
 
 import pytest
@@ -11,17 +10,13 @@ import pytest
 from fastapi_startkit_auth.sessions import (
     InMemorySessionStore,
     SessionStore,
-    SqlSessionStore,
 )
 
 
-@pytest.fixture(params=["memory", "sql"])
-def make_store(request):
+@pytest.fixture
+def make_store():
     def _make(idle_ttl=None):
-        if request.param == "memory":
-            return InMemorySessionStore(idle_ttl=idle_ttl)
-        conn = sqlite3.connect(":memory:", check_same_thread=False)
-        return SqlSessionStore(conn, idle_ttl=idle_ttl)
+        return InMemorySessionStore(idle_ttl=idle_ttl)
 
     return _make
 
@@ -133,70 +128,5 @@ def test_purge_expired_drops_only_dead_sessions(store):
     assert store.find(alive.id) is not None
 
 
-def test_both_implementations_satisfy_the_protocol(store):
+def test_store_satisfies_the_protocol(store):
     assert isinstance(store, SessionStore)
-
-
-def _sql_row_count(store):
-    return store._conn.execute(f"SELECT COUNT(*) FROM {store._table}").fetchone()[0]
-
-
-def test_sql_create_opportunistically_purges_expired_rows():
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    store = SqlSessionStore(conn, purge_interval=0)
-    store.create(user_id=1, guard="web", ttl=-1)
-    store.create(user_id=2, guard="web", ttl=-1)
-    alive = store.create(user_id=3, guard="web", ttl=3600)
-    # The expired rows were swept by the purge-on-create; only live ones remain.
-    assert _sql_row_count(store) == 1
-    assert store.find(alive.id) is not None
-
-
-def test_sql_purge_on_create_respects_the_interval():
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    store = SqlSessionStore(conn, purge_interval=3600)
-    store.create(user_id=1, guard="web", ttl=-1)
-    store.create(user_id=2, guard="web", ttl=3600)
-    # Within the interval nothing is swept: the expired row is still on disk
-    # (dead only to find()).
-    assert _sql_row_count(store) == 2
-
-
-def test_session_purge_interval_is_configurable_via_auth_config():
-    from fastapi_startkit_auth import AuthConfig
-    from fastapi_startkit_auth.manager import AuthManager
-
-    class Config(AuthConfig):
-        key = "session-store-tests-secret-32-bytes!!!!"
-        default = {"guard": "web", "passwords": "users"}
-        guards = {"web": {"driver": "session", "provider": "users"}}
-        providers = {"users": {"driver": "memory", "users": []}}
-        session = {
-            "store": "sql",
-            "connection": lambda: sqlite3.connect(":memory:", check_same_thread=False),
-            "purge_interval": 7,
-        }
-
-    store = AuthManager(Config).session_store
-    assert store._purge_interval == 7
-
-
-def test_session_store_accepts_a_raw_connection():
-    """A raw connection is itself callable; the store must not misfire the
-    factory branch and call it (regression for the callable() detection)."""
-    from fastapi_startkit_auth import AuthConfig
-    from fastapi_startkit_auth.manager import AuthManager
-
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-
-    class Config(AuthConfig):
-        key = "session-store-tests-secret-32-bytes!!!!"
-        default = {"guard": "web", "passwords": "users"}
-        guards = {"web": {"driver": "session", "provider": "users"}}
-        providers = {"users": {"driver": "memory", "users": []}}
-        session = {"store": "sql", "connection": conn}
-
-    store = AuthManager(Config).session_store
-    assert isinstance(store, SqlSessionStore)
-    created = store.create(user_id=1, guard="web", ttl=3600)
-    assert store.find(created.id) is not None

@@ -8,11 +8,14 @@ modules. Everything stays in-memory (no DB, no network): providers use
 import base64
 import hashlib
 import os
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import pytest
 from fastapi import Depends
 from fastapi.testclient import TestClient
 
+import fastapi_startkit_auth
 from fastapi_startkit_auth import (
     Application,
     AuthProvider,
@@ -120,31 +123,43 @@ def client():
     return test_client
 
 
-ASYNC_TABLES = (
-    "sessions",
-    "personal_api_tokens",
-    "oauth_access_tokens",
-    "oauth_refresh_tokens",
-    "oauth_auth_codes",
-)
-ASYNCPG_DSN = os.environ.get("TEST_ASYNCPG_DSN")
+MIGRATIONS_DIR = Path(fastapi_startkit_auth.__file__).parent / "publishable" / "migrations"
+POSTGRES_DSN = os.environ.get("TEST_ASYNCPG_DSN")
+ORM_CONNECTION = "auth_test"
 
 
-@pytest.fixture(params=["aiosqlite", "asyncpg"])
-async def async_connection(request):
-    if request.param == "aiosqlite":
-        import aiosqlite
-
-        connection = await aiosqlite.connect(":memory:")
-        yield connection
-        await connection.close()
-        return
-    if not ASYNCPG_DSN:
+def _orm_config(backend, tmp_path):
+    if backend == "sqlite":
+        return {"driver": "sqlite", "database": str(tmp_path / "auth.db")}
+    if not POSTGRES_DSN:
         pytest.skip("TEST_ASYNCPG_DSN is not set")
-    import asyncpg
+    # Discrete keys rather than "url": the ORM lists tables by the "database" key when dropping them.
+    dsn = urlparse(POSTGRES_DSN)
+    return {
+        "driver": "postgres",
+        "host": dsn.hostname,
+        "port": dsn.port or 5432,
+        "database": dsn.path.lstrip("/"),
+        "username": unquote(dsn.username or ""),
+        "password": unquote(dsn.password or ""),
+    }
 
-    pool = await asyncpg.create_pool(ASYNCPG_DSN, min_size=1, max_size=4)
-    for table in ASYNC_TABLES:
-        await pool.execute(f"DROP TABLE IF EXISTS {table}")
-    yield pool
-    await pool.close()
+
+@pytest.fixture(params=["sqlite", "postgres"])
+async def orm_database(request, tmp_path):
+    """Name of a migrated ORM connection: SQLite, or the throwaway Postgres in TEST_ASYNCPG_DSN."""
+    from fastapi_startkit.application import Application as StartkitApplication
+    from fastapi_startkit.masoniteorm import Migrator, Model
+    from fastapi_startkit.masoniteorm.connections.factory import ConnectionFactory
+    from fastapi_startkit.masoniteorm.connections.manager import DatabaseManager
+
+    config = _orm_config(request.param, tmp_path)
+    StartkitApplication(env="testing")
+    manager = DatabaseManager(ConnectionFactory(), {"default": ORM_CONNECTION, "connections": {ORM_CONNECTION: config}})
+    Model.db_manager = manager
+    Migrator.db_manager = manager
+    migrator = Migrator(migration_directory=str(MIGRATIONS_DIR), connection=ORM_CONNECTION)
+    await migrator.create_table_if_not_exists()
+    await migrator.fresh(ignore_fk=True)
+    yield ORM_CONNECTION
+    await manager.clear()

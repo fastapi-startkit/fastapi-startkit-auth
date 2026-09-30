@@ -7,6 +7,21 @@ Release notes are also published on
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** persistence now goes through the fastapi-startkit ORM with models
+  shipped in `fastapi_startkit_auth.orm`; no raw SQL remains. Use
+  `{"store": "orm"}` (optional ORM `connection` name) for sessions, API tokens and
+  OAuth tokens.
+- **Breaking:** the `startkit` extra now requires `fastapi-startkit[database]>=0.60`.
+- Run the published migrations (`provider:publish -p auth`, then `migrate`) to
+  create the tables; stores no longer create tables themselves.
+
+### Removed
+
+- **Breaking:** the `sql` / `async_sql` stores and the `SqlSessionStore`,
+  `SqlApiTokenRepository`, `AsyncSql*` classes and database adapters.
+
 ## [0.4.0]
 
 ### Added
