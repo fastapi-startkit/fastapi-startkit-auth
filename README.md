@@ -25,11 +25,28 @@ OAuth2 grants and signed JWT access tokens (per the
 
 ## Installation
 
+Requires Python 3.10+.
+
 ```bash
 pip install fastapi-startkit-auth
-# optional ORM provider driver
+# or
+uv add fastapi-startkit-auth
+```
+
+Optional extras:
+
+| Extra | Installs | Use when |
+| --- | --- | --- |
+| `startkit` | `fastapi-startkit>=0.51,<1.0` (Python 3.12+) | Registering `AuthServiceProvider` in a fastapi-startkit app and publishing its `config/cors.py` stub via `provider:publish -p auth` |
+| `masoniteorm` | `masonite-orm` | Using the `masoniteorm` user provider driver |
+
+```bash
+pip install "fastapi-startkit-auth[startkit]"
 pip install "fastapi-startkit-auth[masoniteorm]"
 ```
+
+The `startkit` and `masoniteorm` extras are mutually exclusive: `masonite-orm`
+pins `cleo<2` while `fastapi-startkit` requires `cleo>=2.1`.
 
 > Uses `bcrypt` directly (not `passlib`, which imports the `crypt` stdlib module
 > removed in Python 3.13+), so it runs on modern Python.
@@ -170,31 +187,47 @@ inspect the `AuthContext` (`ctx.can(...)`, `ctx.can_any(...)`, `ctx.scopes`).
 ## Testing
 
 ```bash
+uv sync --group dev
+uv run pytest
+uv run ruff check .
+```
+
+Or with pip:
+
+```bash
 pip install -e ".[test]"
 pytest
 ```
 
-Or with [uv](https://docs.astral.sh/uv/):
-
-```bash
-uv sync --group dev
-uv run pytest
-```
-
 ## Releasing
 
-Releases are cut from `main` with the release script (maintainers only):
+Releases are published by the `.github/workflows/release.yml` workflow using [trusted publishing](https://docs.pypi.org/trusted-publishers/),
+so no PyPI API token is stored anywhere.
 
-```bash
-./bin/release.sh          # patch bump
-./bin/release.sh minor    # or: major
-```
+1. Bump the version and move the `Unreleased` notes in `CHANGELOG.md` under it:
 
-The script bumps the version, builds sdist + wheel, validates them with
-`twine check`, uploads to PyPI, then commits, tags `vX.Y.Z`, and creates a
-GitHub release. It requires `uv`, `gh` (authenticated), and PyPI credentials
-for `twine` (e.g. a `pypi-*` API token via `TWINE_USERNAME=__token__` /
-`TWINE_PASSWORD` or `~/.pypirc`).
+   ```bash
+   uv version --bump patch   # or: minor, major
+   ```
+
+2. Verify the distributions locally:
+
+   ```bash
+   rm -rf dist && uv build
+   uv run twine check --strict dist/*
+   ```
+
+3. Merge, then tag the release commit and push the tag:
+
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+
+The workflow rejects a tag that does not match the `pyproject.toml` version,
+then runs the tests, builds the sdist and wheel, checks them with `twine`, and
+publishes from the `pypi` GitHub environment. The PyPI project must register
+that repository, workflow file, and environment as a trusted publisher.
 
 ## License
 
