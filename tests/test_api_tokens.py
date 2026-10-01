@@ -6,7 +6,6 @@ guarantees, and the guard wired end-to-end through ``current_user`` /
 ``optional_user`` / ability enforcement.
 """
 import hashlib
-import sqlite3
 import time
 
 import pytest
@@ -28,7 +27,6 @@ from fastapi_startkit_auth.apitokens.repository import (
     ApiTokenRepository,
     InMemoryApiTokenRepository,
 )
-from fastapi_startkit_auth.apitokens.sql import SqlApiTokenRepository
 from fastapi_startkit_auth.guards.token import TokenGuard
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
@@ -46,12 +44,9 @@ def sha256(secret: str) -> str:
 # --- repository contract (both stores) --------------------------------
 
 
-@pytest.fixture(params=["memory", "sql"])
-def repo(request):
-    if request.param == "memory":
-        return InMemoryApiTokenRepository()
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    return SqlApiTokenRepository(conn)
+@pytest.fixture
+def repo():
+    return InMemoryApiTokenRepository()
 
 
 def create_record(repo, user_id=1, expires_at=None, abilities=("*",), name=None):
@@ -172,16 +167,6 @@ def test_only_the_hash_is_stored_at_rest(tokens):
     stored = tokens.repository.find(issued.record.id)
     assert stored.token_hash == sha256(secret)
     assert secret not in stored.token_hash
-
-
-def test_sql_store_never_sees_the_plaintext():
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    tokens = ApiTokenManager(SqlApiTokenRepository(conn))
-    issued = tokens.create(user_id=1, name="cli")
-    secret = issued.plain_text.partition("|")[2]
-    for row in conn.execute("SELECT * FROM personal_api_tokens").fetchall():
-        for column in row:
-            assert secret not in str(column)
 
 
 def test_repr_never_leaks_the_secret(tokens):
@@ -346,15 +331,9 @@ def make_client(api_tokens=None, guards=None, default=None):
     return client, application.api.state.auth_manager
 
 
-SQL_API_TOKENS = {
-    "store": "sql",
-    "connection": lambda: sqlite3.connect(":memory:", check_same_thread=False),
-}
-
-
-@pytest.fixture(params=["memory", "sql"])
-def guard_client(request):
-    return make_client(api_tokens=SQL_API_TOKENS if request.param == "sql" else None)
+@pytest.fixture
+def guard_client():
+    return make_client()
 
 
 def bearer(token):
@@ -458,28 +437,6 @@ def test_unknown_api_token_store_raises():
 
     with pytest.raises(ValueError, match="Unknown api_tokens store"):
         AuthManager(token_config(api_tokens={"store": "redis"})).api_tokens
-
-
-def test_sql_store_requires_a_connection():
-    from fastapi_startkit_auth.manager import AuthManager
-
-    with pytest.raises(ValueError, match="requires a \"connection\""):
-        AuthManager(token_config(api_tokens={"store": "sql"})).api_tokens
-
-
-def test_sql_store_accepts_a_raw_connection():
-    """A raw connection is itself callable; the store must not misfire the
-    factory branch and call it (regression for the callable() detection)."""
-    from fastapi_startkit_auth.manager import AuthManager
-
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    manager = AuthManager(
-        token_config(api_tokens={"store": "sql", "connection": conn})
-    )
-    repo = manager.api_tokens.repository
-    assert isinstance(repo, SqlApiTokenRepository)
-    issued = manager.api_tokens.create(user_id=1, name="cli")
-    assert manager.api_tokens.repository.find(issued.record.id) is not None
 
 
 def test_instance_store_is_used_verbatim():

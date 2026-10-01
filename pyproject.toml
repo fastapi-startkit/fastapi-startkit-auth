@@ -59,7 +59,7 @@ Changelog = "https://github.com/fastapi-startkit/fastapi-startkit-auth/blob/main
 masoniteorm = ["masonite-orm>=2.18"]
 # The framework itself only supports Python >=3.12; on older interpreters the
 # extra resolves to nothing and the package stays standalone.
-startkit = ["fastapi-startkit>=0.51,<1.0; python_version >= '3.12'"]
+startkit = ["fastapi-startkit[database]>=0.60,<1.0; python_version >= '3.12'"]
 test = [
     "pytest>=8",
     "pytest-asyncio>=0.23",

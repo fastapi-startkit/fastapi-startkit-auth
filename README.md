@@ -37,7 +37,7 @@ Optional extras:
 
 | Extra | Installs | Use when |
 | --- | --- | --- |
-| `startkit` | `fastapi-startkit>=0.51,<1.0` (Python 3.12+) | Registering `AuthServiceProvider` in a fastapi-startkit app and publishing its `config/cors.py` stub via `provider:publish -p auth` |
+| `startkit` | `fastapi-startkit[database]>=0.60,<1.0` (Python 3.12+) | Registering `AuthServiceProvider`, publishing its config stub and migrations via `provider:publish -p auth`, and the `"orm"` stores |
 | `masoniteorm` | `masonite-orm` | Using the `masoniteorm` user provider driver |
 
 ```bash
@@ -163,32 +163,42 @@ client bound to a different provider with `unauthorized_client`:
 client, secret = manager.client_repository.register(name="admin-panel", provider="admins")
 ```
 
-### Async stores
+### ORM stores and migrations
 
 With an async provider or store, `AuthManager` builds the async guards, grants,
 token service and password broker automatically (use the `AsyncAuth` facade for
-session login/logout). Sessions, API tokens and OAuth tokens can be persisted
-with an async driver — an asyncpg pool, an aiosqlite connection, or a zero-arg
-(async) factory returning one:
+session login/logout). Sessions, API tokens and OAuth tokens persist through the
+fastapi-startkit ORM (`pip install "fastapi-startkit-auth[startkit]"`, which pulls
+in `fastapi-startkit[database]`). The package ships its own models
+(`fastapi_startkit_auth.orm`) and uses no raw SQL:
 
 ```python
-session = {"store": "async_sql", "connection": pool}
-api_tokens = {"store": "async_sql", "connection": pool}
-tokens = {"store": "async_sql", "connection": pool}
+session = {"store": "orm"}
+api_tokens = {"store": "orm"}
+tokens = {"store": "orm", "connection": "auth"}  # optional ORM connection name
 ```
 
-The tables come from the migrations published by `AuthServiceProvider`
-(`provider:publish -p auth`), or from each store's `await create_table()`.
+`connection` names an entry of your database config; omit it to use the default
+connection. Publish and run the migrations once per app (they are reversible
+and create the `sessions`, `personal_api_tokens`, `oauth_access_tokens`,
+`oauth_refresh_tokens` and `oauth_auth_codes` tables with their indexes):
 
-Supported backends are PostgreSQL (asyncpg) and SQLite (aiosqlite). Any other
-driver can be plugged in by passing an object with async `execute` (returning
-the affected row count), `fetch_one` and `fetch_all` methods using `?`
-placeholders. The stores use only portable SQL (no `RETURNING`); the DDL in
-`create_table()` uses `CREATE ... IF NOT EXISTS`, so on MySQL use the
-migrations instead.
+```bash
+python artisan provider:publish -p auth   # copies them to databases/migrations/
+python artisan migrate
+python artisan migrate:rollback           # drops them again
+```
+
+Single-use guarantees rely on conditional `UPDATE`/`DELETE` statements issued
+through the ORM query builder: refresh-token rotation and authorization-code
+redemption each have exactly one winner under concurrency.
+
+The former `sql` and `async_sql` stores were removed; configuring them raises a
+`ValueError` pointing at `"orm"`. Use `"memory"` or an `"instance"` store for
+sync setups.
 
 In mixed setups (async stores with a sync provider or a sync session store),
-the sync calls — lookups, bcrypt, `is_active` hooks, `SqlSessionStore` in
+the sync calls — lookups, bcrypt, `is_active` hooks, a sync session store in
 `SessionMiddleware` — run in the threadpool, never on the event loop.
 An `is_active` attribute name or `async def` hook runs inline, since neither
 blocks.

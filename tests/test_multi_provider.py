@@ -4,7 +4,6 @@ Both providers hold a user with id 1, so a check against the wrong provider
 would silently pass or fail on the other provider's row.
 """
 
-import asyncio
 import base64
 import hashlib
 
@@ -61,7 +60,7 @@ def rows():
 
 
 def make_config(providers, connection=None):
-    stores = {"store": "async_sql", "connection": connection} if connection is not None else {"store": "memory"}
+    stores = {"store": "orm", "connection": connection} if connection is not None else {"store": "memory"}
 
     class Config(AuthConfig):
         key = KEY
@@ -86,9 +85,6 @@ ASYNC_PROVIDERS = {
 async def build(connection):
     application = Application([(AuthProvider, make_config(ASYNC_PROVIDERS, connection))])
     manager = application.auth
-    create_table = getattr(manager.token_repository, "create_table", None)
-    if create_table is not None and asyncio.iscoroutinefunction(create_table):
-        await create_table()
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=application.api), base_url="https://testserver")
     return client, manager
 
@@ -108,16 +104,16 @@ async def staff_tokens(client, manager):
     return issued.json(), (staff_client.id, secret)
 
 
-async def test_password_grant_uses_the_clients_provider(async_connection):
-    client, manager = await build(async_connection)
+async def test_password_grant_uses_the_clients_provider(orm_database):
+    client, manager = await build(orm_database)
     async with client:
         _, auth = await staff_tokens(client, manager)
         wrong_provider = {"grant_type": "password", "username": "ada@example.com", "password": "secret"}
         assert (await client.post("/oauth/token", data=wrong_provider, auth=auth)).json()["error"] == "invalid_grant"
 
 
-async def test_refresh_rechecks_the_issuing_provider(async_connection):
-    client, manager = await build(async_connection)
+async def test_refresh_rechecks_the_issuing_provider(orm_database):
+    client, manager = await build(orm_database)
     assert isinstance(manager.refresh_grant(), AsyncRefreshTokenGrant)
     async with client:
         tokens, auth = await staff_tokens(client, manager)
@@ -132,8 +128,8 @@ async def test_refresh_rechecks_the_issuing_provider(async_connection):
         assert (await client.post("/oauth/token", data=refresh, auth=auth)).json()["error"] == "invalid_grant"
 
 
-async def test_introspect_rechecks_the_issuing_provider(async_connection):
-    client, manager = await build(async_connection)
+async def test_introspect_rechecks_the_issuing_provider(orm_database):
+    client, manager = await build(orm_database)
     async with client:
         tokens, auth = await staff_tokens(client, manager)
         introspect = {"token": tokens["access_token"]}
@@ -143,8 +139,8 @@ async def test_introspect_rechecks_the_issuing_provider(async_connection):
         assert (await client.post("/oauth/introspect", data=introspect, auth=auth)).json() == {"active": False}
 
 
-async def test_authorization_code_rechecks_the_clients_provider(async_connection):
-    _, manager = await build(async_connection)
+async def test_authorization_code_rechecks_the_clients_provider(orm_database):
+    _, manager = await build(orm_database)
     grant = manager.authorization_code_grant()
     assert isinstance(grant, AsyncAuthorizationCodeGrant)
     spa, _ = register(manager, "staff", redirect_uris=["https://app/cb"], confidential=False)
