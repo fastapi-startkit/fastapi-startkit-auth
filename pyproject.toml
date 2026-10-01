@@ -1,6 +1,6 @@
 [project]
 name = "fastapi-startkit-auth"
-version = "0.5.0"
+version = "0.6.1"
 description = "Laravel-style authentication for FastAPI: OAuth2/JWT authorization server, cookie/session guard, SPA + CSRF protection, and Sanctum-style API tokens."
 readme = "README.md"
 license = "MIT"

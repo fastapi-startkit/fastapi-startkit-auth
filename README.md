@@ -285,9 +285,6 @@ pytest
 
 ## Releasing
 
-Releases are published by the `.github/workflows/release.yml` workflow using [trusted publishing](https://docs.pypi.org/trusted-publishers/),
-so no PyPI API token is stored anywhere.
-
 Releases are cut from `main` with the release script (maintainers only):
 
 ```bash
@@ -296,15 +293,14 @@ Releases are cut from `main` with the release script (maintainers only):
 ```
 
 The script bumps the version (`pyproject.toml`, `__version__`, `uv.lock`),
-builds sdist + wheel, validates them with `twine check`, then commits, tags
-`vX.Y.Z`, pushes, and creates a GitHub release. Move the `Unreleased` notes in
-`CHANGELOG.md` under the new version before running it. It requires `uv` and
-`gh` (authenticated).
+builds sdist + wheel, validates them with `twine check`, uploads them to PyPI
+with `twine upload`, then commits, tags `vX.Y.Z`, pushes, and creates a GitHub
+release. Move the `Unreleased` notes in `CHANGELOG.md` under the new version
+before running it.
 
-Pushing the tag triggers the workflow, which rejects a tag that does not match the `pyproject.toml` version,
-then runs the tests, builds the sdist and wheel, checks them with `twine`, and
-publishes from the `pypi` GitHub environment. The PyPI project must register
-that repository, workflow file, and environment as a trusted publisher.
+It requires `uv`, an authenticated `gh`, and PyPI credentials for twine: either
+a `[pypi]` entry in `~/.pypirc` (`username = __token__`, `password = pypi-...`)
+or `TWINE_USERNAME=__token__` and `TWINE_PASSWORD=pypi-...` in the environment.
 
 ## License
 
