@@ -43,7 +43,7 @@ from .sessions.models import SessionRecord
 from .sessions.store import InMemorySessionStore, SessionStore
 from .tokens.service import AsyncTokenService, TokenService
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = (
     "AuthConfig",
