@@ -2,11 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from typing import Any
+from typing import Any, get_type_hints
 
 from ..concurrency import call, is_coroutine_callable, resolve
 from ..security.hashing import BcryptHasher, Hasher
 from .fields import ActiveCheck, active_check, read_attribute, write_attribute
+
+
+def _identifier_for_model(model: Any, identifier: Any, id_field: str) -> Any:
+    if not isinstance(identifier, str) or not identifier.isdecimal():
+        return identifier
+    try:
+        key_type = get_type_hints(model).get(id_field)
+    except (NameError, TypeError):
+        key_type = getattr(model, "__annotations__", {}).get(id_field)
+    if key_type is int or key_type == "int":
+        return int(identifier)
+    return identifier
 
 
 class ModelUserProvider:
@@ -41,7 +53,7 @@ class ModelUserProvider:
         self._hasher.verify("invalid", self._dummy_hash)
 
     def retrieve_by_id(self, identifier: Any) -> Any | None:
-        return self._model.find(identifier)
+        return self._model.find(_identifier_for_model(self._model, identifier, self._id_field))
 
     def retrieve_by_credentials(self, credentials: dict[str, Any]) -> Any | None:
         username = credentials.get(self._username_field)
@@ -103,7 +115,7 @@ class AsyncModelUserProvider:
         await asyncio.to_thread(self._hasher.verify, "invalid", self._dummy_hash)
 
     async def retrieve_by_id(self, identifier: Any) -> Any | None:
-        return await resolve(self._model.find(identifier))
+        return await resolve(self._model.find(_identifier_for_model(self._model, identifier, self._id_field)))
 
     async def retrieve_by_credentials(self, credentials: dict[str, Any]) -> Any | None:
         username = credentials.get(self._username_field)

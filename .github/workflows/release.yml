@@ -24,7 +24,7 @@ jobs:
             echo "Tag ${GITHUB_REF_NAME} does not match pyproject version ${version}" >&2
             exit 1
           fi
-      - run: uv sync --locked --group dev
+      - run: uv sync --locked --group dev --extra startkit
       - run: uv run pytest
       - run: uv build
       - run: uv run twine check --strict dist/*
