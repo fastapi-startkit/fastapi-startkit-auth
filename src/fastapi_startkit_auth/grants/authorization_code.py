@@ -10,7 +10,7 @@ from ..exceptions import InvalidGrant, InvalidRequest
 from ..tokens.service import IssuedToken, TokenService
 from ..tokens.models import AuthorizationCode
 from .pkce import verify_pkce
-from .refresh import ensure_owner_active, ensure_owner_active_async
+from .refresh import OwnerProviderResolver, ensure_owner_active, ensure_owner_active_async, owner_resolver
 
 
 def _new_code(client: Client, code_challenge: str | None) -> str:
@@ -53,10 +53,16 @@ class AuthorizationCodeGrant:
     ``handle`` exchanges the resulting single-use code for tokens.
     """
 
-    def __init__(self, token_service: TokenService, code_ttl: int = 600, user_provider: Any = None) -> None:
+    def __init__(
+        self,
+        token_service: TokenService,
+        code_ttl: int = 600,
+        user_provider: Any = None,
+        owner_provider: OwnerProviderResolver | None = None,
+    ) -> None:
         self._tokens = token_service
         self._code_ttl = code_ttl
-        self._users = user_provider
+        self._owner_provider = owner_resolver(user_provider, owner_provider)
 
     def issue_code(
         self,
@@ -92,7 +98,7 @@ class AuthorizationCodeGrant:
     ) -> IssuedToken:
         record = self._tokens.repository.pull_auth_code(code)
         _validate_exchange(record, client, redirect_uri, code_verifier, client_authenticated)
-        ensure_owner_active(self._users, record.user_id)
+        ensure_owner_active(self._owner_provider(client.id), record.user_id)
         return self._tokens.issue(
             user_id=record.user_id,
             client_id=client.id,
@@ -102,10 +108,16 @@ class AuthorizationCodeGrant:
 
 
 class AsyncAuthorizationCodeGrant:
-    def __init__(self, token_service: Any, code_ttl: int = 600, user_provider: Any = None) -> None:
+    def __init__(
+        self,
+        token_service: Any,
+        code_ttl: int = 600,
+        user_provider: Any = None,
+        owner_provider: OwnerProviderResolver | None = None,
+    ) -> None:
         self._tokens = token_service
         self._code_ttl = code_ttl
-        self._users = user_provider
+        self._owner_provider = owner_resolver(user_provider, owner_provider)
 
     async def issue_code(
         self,
@@ -142,7 +154,7 @@ class AsyncAuthorizationCodeGrant:
     ) -> IssuedToken:
         record = await call(self._tokens.repository.pull_auth_code, code)
         _validate_exchange(record, client, redirect_uri, code_verifier, client_authenticated)
-        await ensure_owner_active_async(self._users, record.user_id)
+        await ensure_owner_active_async(self._owner_provider(client.id), record.user_id)
         return await call(
             self._tokens.issue,
             user_id=record.user_id,

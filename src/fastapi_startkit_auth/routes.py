@@ -122,7 +122,7 @@ def build_router(prefix: str = "") -> APIRouter:
             if client_id:
                 _authenticate_client(manager, client_id, client_secret, "password")
             issued = await call(
-                manager.password_grant().handle,
+                manager.password_grant(client_id=client_id).handle,
                 username=username or "",
                 password=password or "",
                 scopes=scopes,
@@ -194,7 +194,10 @@ def build_router(prefix: str = "") -> APIRouter:
             raise InvalidClient("Unknown client.")
         if body.redirect_uri is not None and not client.allows_redirect(body.redirect_uri):
             raise InvalidRequest("redirect_uri is not registered for this client.")
-        user_id = manager.guard().provider.get_identifier(user)
+        provider = manager.guard().provider
+        if manager.owner_provider(client.id) is not provider:
+            raise UnauthorizedClient("This client does not act for users of the authenticated provider.")
+        user_id = provider.get_identifier(user)
         code = await call(
             manager.authorization_code_grant().issue_code,
             client=client,

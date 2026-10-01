@@ -334,14 +334,38 @@ class AuthManager:
     def _grants_async(self, provider: Any) -> bool:
         return self._tokens_async() or (provider is not None and is_async_provider(provider))
 
-    def _owner_provider(self) -> Any:
+    def _owner_grants_async(self) -> bool:
+        # Owner re-checks resolve their provider per token, so any async
+        # provider requires the async grant.
+        return self._tokens_async() or any(is_async_provider(p) for p in self._providers.values())
+
+    def _default_owner_provider(self) -> Any:
         guards = self._config.get("guards", {})
         if self.default_guard_name() not in guards:
             return None
         return getattr(self.guard(), "provider", None)
 
-    def password_grant(self, guard: str | None = None) -> PasswordGrant | AsyncPasswordGrant:
-        provider = self.guard(guard).provider
+    def _client_provider(self, client_id: str | None) -> UserProvider | None:
+        client = self.client_repository.find(client_id) if client_id else None
+        if client is None or not client.provider:
+            return None
+        return self._require_provider(client.provider)
+
+    def owner_provider(self, client_id: str | None = None) -> Any:
+        """Return the user provider behind tokens and codes issued to ``client_id``.
+
+        A client registered with a ``provider`` acts for that provider's users;
+        otherwise (or with no client) the default guard's provider applies.
+        """
+        provider = self._client_provider(client_id)
+        return provider if provider is not None else self._default_owner_provider()
+
+    def password_grant(
+        self, guard: str | None = None, client_id: str | None = None
+    ) -> PasswordGrant | AsyncPasswordGrant:
+        provider = self._client_provider(client_id)
+        if provider is None:
+            provider = self.guard(guard).provider
         if self._grants_async(provider):
             return AsyncPasswordGrant(self.token_service, provider)
         return PasswordGrant(self.token_service, provider)
@@ -351,23 +375,32 @@ class AuthManager:
         return grant_class(self.token_service)
 
     def refresh_grant(self) -> RefreshTokenGrant | AsyncRefreshTokenGrant:
-        provider = self._owner_provider()
-        grant_class = AsyncRefreshTokenGrant if self._grants_async(provider) else RefreshTokenGrant
-        return grant_class(self.token_service, user_provider=provider)
+        grant_class = AsyncRefreshTokenGrant if self._owner_grants_async() else RefreshTokenGrant
+        return grant_class(self.token_service, owner_provider=self.owner_provider)
 
     def authorization_code_grant(self) -> AuthorizationCodeGrant | AsyncAuthorizationCodeGrant:
-        provider = self._owner_provider()
-        grant_class = AsyncAuthorizationCodeGrant if self._grants_async(provider) else AuthorizationCodeGrant
+        grant_class = AsyncAuthorizationCodeGrant if self._owner_grants_async() else AuthorizationCodeGrant
         return grant_class(
             self.token_service,
             code_ttl=self._config.get("authorization_code_ttl", 600),
-            user_provider=provider,
+            owner_provider=self.owner_provider,
         )
 
     async def introspect(self, access_token: str) -> dict[str, Any]:
         result = await call(self.token_service.introspect, access_token)
         sub = result.get("sub") if result.get("active") else None
-        provider = self._owner_provider()
+        provider = self.owner_provider(result.get("client_id"))
         if sub is not None and provider is not None and await active_user_async(provider, sub) is None:
             return {"active": False}
         return result
+
+    async def warm_up(self) -> None:
+        """Precompute provider state (e.g. the dummy hash) off the event loop.
+
+        Run once at startup so the first unknown-user login is not a bcrypt
+        round slower than later ones.
+        """
+        for provider in self._providers.values():
+            warm_up = getattr(provider, "warm_up", None)
+            if callable(warm_up):
+                await call(warm_up)

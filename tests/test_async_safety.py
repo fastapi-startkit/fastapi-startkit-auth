@@ -1,12 +1,13 @@
 import asyncio
 import base64
+import contextlib
 import hashlib
 import warnings
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import Body, Depends
+from fastapi import Body, Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
@@ -19,12 +20,12 @@ from fastapi_startkit_auth import (
     SessionGuard,
     current_user,
 )
-from fastapi_startkit_auth.sessions.store import InMemorySessionStore
+from fastapi_startkit_auth import concurrency
 from fastapi_startkit_auth.concurrency import AsyncMisconfiguration
 from fastapi_startkit_auth.grants import AsyncPasswordGrant, PasswordGrant, RefreshTokenGrant
 from fastapi_startkit_auth.providers.base import user_is_active
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
-from fastapi_startkit_auth.providers.model import ModelUserProvider
+from fastapi_startkit_auth.providers.model import AsyncModelUserProvider, ModelUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.security.jwt import JWTEncoder
 from fastapi_startkit_auth.sessions.store import InMemorySessionStore
@@ -386,3 +387,110 @@ async def test_sync_provider_and_session_store_never_run_on_the_loop(orm_databas
         assert (await client.get("/oauth/personal-access-tokens", headers=bearer(token))).status_code == 200
     assert len(LOOP_CALLS) > 10
     assert not any(LOOP_CALLS)
+
+
+# --- is_active only leaves the loop for a sync hook -------------------------
+
+
+@pytest.fixture
+def offloads(monkeypatch):
+    calls = []
+    original = concurrency.run_in_threadpool
+
+    async def recording(function, *args, **kwargs):
+        calls.append(function)
+        return await original(function, *args, **kwargs)
+
+    monkeypatch.setattr(concurrency, "run_in_threadpool", recording)
+    return calls
+
+
+@pytest.mark.parametrize("hook", [None, "active", account_is_active])
+async def test_async_is_active_runs_cheap_hooks_inline(offloads, hook):
+    provider = AsyncModelUserProvider(Account, hasher=HASHER, is_active=hook)
+    assert await provider.is_active(Account.rows[1]) is True
+    if hook is not None:
+        assert await provider.is_active(Account.rows[2]) is False
+    assert offloads == []
+
+
+async def test_async_is_active_offloads_a_sync_hook(offloads):
+    provider = AsyncModelUserProvider(Account, hasher=HASHER, is_active=sync_is_active)
+    assert await provider.is_active(Account.rows[1]) is True
+    assert offloads == [sync_is_active]
+    assert LOOP_CALLS == [False]
+
+
+async def test_async_is_active_awaits_a_sync_hook_returning_an_awaitable(offloads):
+    provider = AsyncModelUserProvider(Account, hasher=HASHER, is_active=lambda user: account_is_active(user))
+    assert await provider.is_active(Account.rows[1]) is True
+    assert await provider.is_active(Account.rows[2]) is False
+    assert len(offloads) == 2
+
+
+async def failing_is_active(user):
+    raise RuntimeError("status service down")
+
+
+def failing_sync_is_active(user):
+    raise RuntimeError("status service down")
+
+
+@pytest.mark.parametrize("hook", [failing_is_active, failing_sync_is_active])
+async def test_async_is_active_fails_closed_when_the_hook_raises(orm_database, hook):
+    client, _ = await build(orm_database, provider={**ASYNC_PROVIDER, "is_active": hook})
+    async with client:
+        with pytest.raises(RuntimeError):
+            await password_token(client)
+
+
+async def test_async_is_active_treats_a_missing_attribute_as_inactive():
+    provider = AsyncModelUserProvider(Account, hasher=HASHER, is_active="active")
+    assert await provider.is_active(SimpleNamespace(id=3)) is False
+
+
+# --- dummy hash warm-up -----------------------------------------------------
+
+
+def instance_config(provider):
+    return make_config(provider={"driver": "instance", "instance": provider})
+
+
+async def test_manager_warm_up_precomputes_the_dummy_hash_off_the_loop():
+    provider = AsyncModelUserProvider(Account, hasher=RecordingHasher(rounds=4))
+    manager = Application([(AuthProvider, instance_config(provider))]).auth
+    await manager.warm_up()
+    warmed = provider._dummy_hash
+    assert warmed is not None
+    assert LOOP_CALLS == [False]
+
+    LOOP_CALLS.clear()
+    await provider.dummy_verify()
+    await manager.warm_up()
+    assert provider._dummy_hash == warmed
+    assert LOOP_CALLS == [False], "a warmed provider only runs the verify"
+
+
+def test_app_startup_warms_the_providers():
+    provider = AsyncModelUserProvider(Account, hasher=HASHER)
+    application = Application([(AuthProvider, instance_config(provider))])
+    assert provider._dummy_hash is None
+    with TestClient(application.api):
+        assert provider._dummy_hash is not None
+
+
+def test_app_startup_keeps_the_apps_own_lifespan():
+    events = []
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        events.append("start")
+        yield
+        events.append("stop")
+
+    provider = AsyncModelUserProvider(Account, hasher=HASHER)
+    application = Application([(AuthProvider, instance_config(provider))], api=FastAPI(lifespan=lifespan))
+    with TestClient(application.api):
+        assert provider._dummy_hash is not None
+        assert events == ["start"]
+    assert events == ["start", "stop"]
