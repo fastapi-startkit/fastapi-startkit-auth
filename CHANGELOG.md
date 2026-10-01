@@ -97,8 +97,8 @@ Release notes are also published on
 - The package `__init__` imports its public API directly instead of through a
   lazy export table.
 - The source distribution now ships the test suite and this changelog.
-- Releases are published from GitHub Actions via PyPI trusted publishing on
-  `vX.Y.Z` tags, replacing `bin/release.sh`.
+- `bin/release.sh` uploads to PyPI with `twine upload`, matching
+  fastapi-startkit; the tag-triggered trusted-publishing workflow is removed.
 
 ## [0.3.0]
 
