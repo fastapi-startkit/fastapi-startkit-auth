@@ -3,6 +3,8 @@ import time
 
 import pytest
 
+pytest.importorskip("fastapi_startkit.masoniteorm.models")
+
 from fastapi_startkit_auth import orm
 from fastapi_startkit_auth.apitokens.orm import OrmApiTokenRepository
 from fastapi_startkit_auth.sessions.orm import OrmSessionStore
