@@ -10,6 +10,9 @@ class Client:
     Confidential clients authenticate with a secret; public clients (SPAs, native
     apps) do not and must use the authorization-code + PKCE flow. An empty
     ``grant_types`` means the client may use any supported grant.
+
+    ``provider`` names the ``AuthConfig.providers`` entry whose users this
+    client acts for; ``None`` means the default guard's provider.
     """
 
     id: str
@@ -19,6 +22,7 @@ class Client:
     confidential: bool = True
     grant_types: list[str] = field(default_factory=list)
     revoked: bool = False
+    provider: str | None = None
 
     def allows_redirect(self, uri: str) -> bool:
         return uri in self.redirect_uris

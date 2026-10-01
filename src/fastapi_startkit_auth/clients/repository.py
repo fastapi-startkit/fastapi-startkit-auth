@@ -25,6 +25,7 @@ class InMemoryClientRepository:
         redirect_uris: list[str] | None = None,
         confidential: bool = True,
         grant_types: list[str] | None = None,
+        provider: str | None = None,
     ) -> tuple[Client, str | None]:
         client_id = uuid.uuid4().hex
         plain_secret: str | None = None
@@ -39,6 +40,7 @@ class InMemoryClientRepository:
             redirect_uris=list(redirect_uris or []),
             confidential=confidential,
             grant_types=list(grant_types or []),
+            provider=provider,
         )
         self._clients[client_id] = client
         return client, plain_secret
