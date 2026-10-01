@@ -27,13 +27,17 @@ if [ -f "$PACKAGE_DIR/pyproject.toml" ]; then
     rm -rf dist/
     uv build
 
-    # Publishing happens in CI (trusted publishing) when the tag is pushed
     echo "   Checking distributions..."
     uv run twine check --strict dist/*
+
+    echo "   Publishing..."
+    uv run twine upload dist/* --verbose
 
     echo "📌 Committing version bump..."
     git add pyproject.toml uv.lock src/fastapi_startkit_auth/__init__.py
     git commit -m "chore: release v$VERSION"
+
+    PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
     echo "🏷️ Creating git tag..."
     git tag "v$VERSION"
@@ -43,8 +47,6 @@ if [ -f "$PACKAGE_DIR/pyproject.toml" ]; then
     git push origin "v$VERSION"
 
     echo "🚀 Creating GitHub release..."
-
-    PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
     if [ -n "$PREV_TAG" ]; then
         git log "$PREV_TAG..HEAD" --pretty=format:"- %s" > CHANGELOG.tmp
