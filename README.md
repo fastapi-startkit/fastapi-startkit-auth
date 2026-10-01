@@ -258,27 +258,20 @@ pytest
 Releases are published by the `.github/workflows/release.yml` workflow using [trusted publishing](https://docs.pypi.org/trusted-publishers/),
 so no PyPI API token is stored anywhere.
 
-1. Bump the version and move the `Unreleased` notes in `CHANGELOG.md` under it:
+Releases are cut from `main` with the release script (maintainers only):
 
-   ```bash
-   uv version --bump patch   # or: minor, major
-   ```
+```bash
+./bin/release.sh          # patch bump
+./bin/release.sh minor    # or: major
+```
 
-2. Verify the distributions locally:
+The script bumps the version (`pyproject.toml`, `__version__`, `uv.lock`),
+builds sdist + wheel, validates them with `twine check`, then commits, tags
+`vX.Y.Z`, pushes, and creates a GitHub release. Move the `Unreleased` notes in
+`CHANGELOG.md` under the new version before running it. It requires `uv` and
+`gh` (authenticated).
 
-   ```bash
-   rm -rf dist && uv build
-   uv run twine check --strict dist/*
-   ```
-
-3. Merge, then tag the release commit and push the tag:
-
-   ```bash
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   ```
-
-The workflow rejects a tag that does not match the `pyproject.toml` version,
+Pushing the tag triggers the workflow, which rejects a tag that does not match the `pyproject.toml` version,
 then runs the tests, builds the sdist and wheel, checks them with `twine`, and
 publishes from the `pypi` GitHub environment. The PyPI project must register
 that repository, workflow file, and environment as a trusted publisher.
