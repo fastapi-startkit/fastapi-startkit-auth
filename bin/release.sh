@@ -42,20 +42,6 @@ if [ -f "$PACKAGE_DIR/pyproject.toml" ]; then
     git push origin main
     git push origin "v$VERSION"
 
-    echo "⏳ Waiting for the v$VERSION release workflow..."
-    RUN_ID=""
-    while [ -z "$RUN_ID" ]; do
-        RUN_ID=$(gh run list --workflow release.yml --limit 20 --json headBranch,databaseId \
-            --jq ".[] | select(.headBranch == \"v$VERSION\") | .databaseId" | head -n 1)
-        if [ -z "$RUN_ID" ]; then
-            sleep 3
-        fi
-    done
-    if ! gh run watch "$RUN_ID" --exit-status; then
-        echo "❌ Release workflow for v$VERSION failed; PyPI publishing may not have completed." >&2
-        exit 1
-    fi
-
     echo "🚀 Creating GitHub release..."
 
     PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
