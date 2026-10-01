@@ -148,6 +148,7 @@ def _orm_config(backend, tmp_path):
 @pytest.fixture(params=["sqlite", "postgres"])
 async def orm_database(request, tmp_path):
     """Name of a migrated ORM connection: SQLite, or the throwaway Postgres in TEST_ASYNCPG_DSN."""
+    pytest.importorskip("fastapi_startkit.masoniteorm.models")
     from fastapi_startkit.application import Application as StartkitApplication
     from fastapi_startkit.masoniteorm import Migrator, Model
     from fastapi_startkit.masoniteorm.connections.factory import ConnectionFactory
