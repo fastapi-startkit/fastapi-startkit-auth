@@ -19,7 +19,13 @@ Release notes are also published on
 - `AuthConfig.issuer` stamps and verifies the `iss` claim.
 - `AuthConfig.scopes` is a scope catalog: when set, grants refuse unknown scopes
   with `invalid_scope`.
-- `AuthConfig.pkce_methods` restricts `code_challenge_method` (e.g. `["S256"]`).
+- `AuthConfig.pkce_methods` restricts `code_challenge_method` (e.g. `["S256"]`),
+  compared case-insensitively.
+- `AuthConfig.require_pkce` demands a `code_challenge` from confidential clients
+  too (OAuth 2.1 / MCP).
+- A repeated `resource` parameter on the token endpoint fails with `invalid_target`.
+- Building a guard whose `audience` is not listed in `AuthConfig.resources` emits
+  a `UserWarning`.
 - `GrantPolicy`, `InvalidScope` and `InvalidTarget` are exported; introspection
   reports `aud` and `iss` when present.
 - Migration `add_resource_to_oauth_tables` adds a nullable `resource` column to
@@ -32,6 +38,7 @@ Release notes are also published on
   shipped in `fastapi_startkit_auth.orm`; no raw SQL remains. Use
   `{"store": "orm"}` (optional ORM `connection` name) for sessions, API tokens and
   OAuth tokens.
+- Requires `pyjwt>=2.10.1`.
 - **Breaking:** the `startkit` extra now requires `fastapi-startkit[database]>=0.60`.
 - Run the published migrations (`provider:publish -p auth`, then `migrate`) to
   create the tables; stores no longer create tables themselves.
