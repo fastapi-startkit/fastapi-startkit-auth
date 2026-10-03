@@ -94,6 +94,7 @@ def make_config(connection, *, default_guard="api", sent=None):
         session = {"store": "orm", "connection": connection}
         api_tokens = {"store": "orm", "connection": connection}
         tokens = {"store": "orm", "connection": connection}
+        clients = {"store": "orm", "connection": connection}
         spa = {"enabled": True}
         password_reset_notifier = staticmethod(lambda email, token: sent.append((email, token))) if sent is not None else None
 
@@ -285,7 +286,7 @@ async def test_refresh_rotates_and_rejects_reuse(app):
 
 async def test_introspect_and_revoke(app):
     client, manager = app
-    confidential, secret = manager.client_repository.register(name="rs", grant_types=["client_credentials"])
+    confidential, secret = await manager.client_repository.register(name="rs", grant_types=["client_credentials"])
     auth = (confidential.id, secret)
     token = (await password_token(client)).json()["access_token"]
     active = await client.post("/oauth/introspect", data={"token": token}, auth=auth)
@@ -297,7 +298,7 @@ async def test_introspect_and_revoke(app):
 
 async def test_client_credentials_grant(app):
     client, manager = app
-    machine, secret = manager.client_repository.register(name="svc", grant_types=["client_credentials"])
+    machine, secret = await manager.client_repository.register(name="svc", grant_types=["client_credentials"])
     issued = await client.post(
         "/oauth/token", data={"grant_type": "client_credentials", "scope": "jobs"}, auth=(machine.id, secret)
     )
@@ -308,7 +309,7 @@ async def test_client_credentials_grant(app):
 
 async def test_authorization_code_with_pkce_is_single_use(app):
     client, manager = app
-    spa, _ = manager.client_repository.register(
+    spa, _ = await manager.client_repository.register(
         name="spa", redirect_uris=["https://app/cb"], confidential=False, grant_types=["authorization_code"]
     )
     verifier = "v" * 64

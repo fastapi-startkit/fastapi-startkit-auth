@@ -17,6 +17,7 @@ class ClientCredentialsGrant:
 
     def handle(self, *, client: Client, scopes: list[str], resource: str | None = None) -> IssuedToken:
         self._policy.check_scopes(scopes)
+        self._policy.check_client_scopes(client, scopes)
         self._policy.check_resource(resource)
         return self._tokens.issue(
             user_id=None,
@@ -34,6 +35,7 @@ class AsyncClientCredentialsGrant:
 
     async def handle(self, *, client: Client, scopes: list[str], resource: str | None = None) -> IssuedToken:
         self._policy.check_scopes(scopes)
+        self._policy.check_client_scopes(client, scopes)
         self._policy.check_resource(resource)
         return await call(
             self._tokens.issue,

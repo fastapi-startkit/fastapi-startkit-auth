@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -13,6 +14,9 @@ class Client:
 
     ``provider`` names the ``AuthConfig.providers`` entry whose users this
     client acts for; ``None`` means the default guard's provider.
+
+    ``scopes`` lists the scopes the client may request (empty means any), and
+    ``owner_id`` records the user who registered it.
     """
 
     id: str
@@ -23,9 +27,14 @@ class Client:
     grant_types: list[str] = field(default_factory=list)
     revoked: bool = False
     provider: str | None = None
+    scopes: list[str] = field(default_factory=list)
+    owner_id: Any | None = None
 
     def allows_redirect(self, uri: str) -> bool:
         return uri in self.redirect_uris
+
+    def allows_scopes(self, scopes: list[str]) -> bool:
+        return not self.scopes or set(scopes) <= set(self.scopes)
 
     def allows_grant(self, grant_type: str) -> bool:
         if not self.grant_types:

@@ -95,6 +95,23 @@ class AuthCode(_AuthModel):
     resource: str
 
 
+class AuthClient(_AuthModel):
+    __table__ = "oauth_clients"
+    __primary_key__ = "id"
+
+    id: str
+    name: str
+    secret: str
+    redirect_uris: str
+    confidential: bool
+    grant_types: str
+    scopes: str
+    provider: str
+    owner_id: str
+    revoked: bool
+    created_at: float
+
+
 def query(model: type[Model], connection: str | None = None) -> Any:
     """A query builder for ``model`` on the named ORM connection (default: the app default)."""
     instance = model()

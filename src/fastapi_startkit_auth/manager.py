@@ -7,7 +7,8 @@ from typing import Any, Callable
 from .apitokens.manager import ApiTokenManager, AsyncApiTokenManager
 from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
 from .clients.repository import InMemoryClientRepository
-from .concurrency import call, has_async_methods
+from .clients.models import Client
+from .concurrency import call, ensure_sync, has_async_methods
 from .config import AuthConfig, as_config_class
 from .grants.authorization_code import AsyncAuthorizationCodeGrant, AuthorizationCodeGrant
 from .grants.client_credentials import AsyncClientCredentialsGrant, ClientCredentialsGrant
@@ -83,7 +84,8 @@ class AuthManager:
             refresh_ttl=cfg.get("refresh_token_ttl", 1209600),
             personal_access_ttl=cfg.get("personal_access_token_ttl", 31536000),
         )
-        self.client_repository = InMemoryClientRepository(hasher=self.hasher)
+        self.clients_config = {**AuthConfig.clients, **cfg.get("clients", {})}
+        self.client_repository = self._build_client_repository()
 
         self._notifier = cfg.get("password_reset_notifier")
         self.debug_expose_reset_token = bool(cfg.get("debug_expose_reset_token", False))
@@ -277,6 +279,19 @@ class AuthManager:
             return spec["instance"]
         raise ValueError(f"Unknown tokens store: {kind!r}")
 
+    def _build_client_repository(self) -> Any:
+        spec = self.clients_config
+        kind = spec.get("store", "memory")
+        if kind == "memory":
+            return InMemoryClientRepository(hasher=self.hasher)
+        if kind == "orm":
+            from .clients.orm import OrmClientRepository
+
+            return OrmClientRepository(spec.get("connection"), hasher=self.hasher)
+        if kind == "instance":
+            return spec["instance"]
+        raise ValueError(f"Unknown clients store: {kind!r}")
+
     def session_guard_name(self) -> str | None:
         """Name of the first configured session guard, or ``None``."""
         return next(
@@ -342,10 +357,17 @@ class AuthManager:
     def _grants_async(self, provider: Any) -> bool:
         return self._tokens_async() or (provider is not None and is_async_provider(provider))
 
+    def _clients_async(self) -> bool:
+        return has_async_methods(self.client_repository, ["find"])
+
     def _owner_grants_async(self) -> bool:
         # Owner re-checks resolve their provider per token, so any async
-        # provider requires the async grant.
-        return self._tokens_async() or any(is_async_provider(p) for p in self._providers.values())
+        # provider or client store requires the async grant.
+        return (
+            self._tokens_async()
+            or self._clients_async()
+            or any(is_async_provider(p) for p in self._providers.values())
+        )
 
     def _default_owner_provider(self) -> Any:
         guards = self._config.get("guards", {})
@@ -353,25 +375,37 @@ class AuthManager:
             return None
         return getattr(self.guard(), "provider", None)
 
-    def _client_provider(self, client_id: str | None) -> UserProvider | None:
-        client = self.client_repository.find(client_id) if client_id else None
+    def _client_provider(self, client: Client | None) -> UserProvider | None:
         if client is None or not client.provider:
             return None
         return self._require_provider(client.provider)
 
-    def owner_provider(self, client_id: str | None = None) -> Any:
-        """Return the user provider behind tokens and codes issued to ``client_id``.
+    def _find_client(self, client_id: str | None) -> Client | None:
+        if not client_id:
+            return None
+        return ensure_sync(self.client_repository.find(client_id), "The client repository's find")
+
+    def client_owner_provider(self, client: Client | None) -> Any:
+        """Return the user provider whose users ``client`` acts for.
 
         A client registered with a ``provider`` acts for that provider's users;
         otherwise (or with no client) the default guard's provider applies.
         """
-        provider = self._client_provider(client_id)
+        provider = self._client_provider(client)
         return provider if provider is not None else self._default_owner_provider()
 
+    def owner_provider(self, client_id: str | None = None) -> Any:
+        """Return the user provider behind tokens and codes issued to ``client_id``."""
+        return self.client_owner_provider(self._find_client(client_id))
+
+    async def owner_provider_async(self, client_id: str | None = None) -> Any:
+        client = await call(self.client_repository.find, client_id) if client_id else None
+        return self.client_owner_provider(client)
+
     def password_grant(
-        self, guard: str | None = None, client_id: str | None = None
+        self, guard: str | None = None, client_id: str | None = None, client: Client | None = None
     ) -> PasswordGrant | AsyncPasswordGrant:
-        provider = self._client_provider(client_id)
+        provider = self._client_provider(client or self._find_client(client_id))
         if provider is None:
             provider = self.guard(guard).provider
         if self._grants_async(provider):
@@ -383,22 +417,26 @@ class AuthManager:
         return grant_class(self.token_service, self.grant_policy)
 
     def refresh_grant(self) -> RefreshTokenGrant | AsyncRefreshTokenGrant:
-        grant_class = AsyncRefreshTokenGrant if self._owner_grants_async() else RefreshTokenGrant
-        return grant_class(self.token_service, owner_provider=self.owner_provider)
+        if self._owner_grants_async():
+            return AsyncRefreshTokenGrant(self.token_service, owner_provider=self.owner_provider_async)
+        return RefreshTokenGrant(self.token_service, owner_provider=self.owner_provider)
 
     def authorization_code_grant(self) -> AuthorizationCodeGrant | AsyncAuthorizationCodeGrant:
-        grant_class = AsyncAuthorizationCodeGrant if self._owner_grants_async() else AuthorizationCodeGrant
+        if self._owner_grants_async():
+            grant_class, owner_provider = AsyncAuthorizationCodeGrant, self.owner_provider_async
+        else:
+            grant_class, owner_provider = AuthorizationCodeGrant, self.owner_provider
         return grant_class(
             self.token_service,
             code_ttl=self._config.get("authorization_code_ttl", 600),
-            owner_provider=self.owner_provider,
+            owner_provider=owner_provider,
             policy=self.grant_policy,
         )
 
     async def introspect(self, access_token: str) -> dict[str, Any]:
         result = await call(self.token_service.introspect, access_token)
         sub = result.get("sub") if result.get("active") else None
-        provider = self.owner_provider(result.get("client_id"))
+        provider = await self.owner_provider_async(result.get("client_id"))
         if sub is not None and provider is not None and await active_user_async(provider, sub) is None:
             return {"active": False}
         return result

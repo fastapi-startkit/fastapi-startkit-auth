@@ -7,6 +7,8 @@ pytest.importorskip("fastapi_startkit.masoniteorm.models")
 
 from fastapi_startkit_auth import orm
 from fastapi_startkit_auth.apitokens.orm import OrmApiTokenRepository
+from fastapi_startkit_auth.clients.orm import OrmClientRepository
+from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.sessions.orm import OrmSessionStore
 from fastapi_startkit_auth.tokens.orm import OrmTokenRepository
 
@@ -216,6 +218,42 @@ async def test_purge_on_create_respects_the_interval(orm_database):
     await store.create(user_id=1, guard="web", ttl=-1)
     await store.create(user_id=2, guard="web", ttl=3600)
     assert len(await orm.query(orm.AuthSession, orm_database).get()) == 2
+
+
+async def test_client_round_trip_with_hashed_secret(orm_database):
+    repo = OrmClientRepository(orm_database, hasher=BcryptHasher(rounds=4))
+    client, secret = await repo.register(
+        name="claude",
+        redirect_uris=["http://localhost:3334/cb"],
+        grant_types=["authorization_code", "refresh_token"],
+        scopes=["content:write"],
+        owner_id=7,
+    )
+    stored = await orm.query(orm.AuthClient, orm_database).where("id", client.id).first()
+    assert stored.secret != secret
+
+    found = await repo.find(client.id)
+    assert (found.redirect_uris, found.scopes, found.owner_id, found.confidential) == (
+        ["http://localhost:3334/cb"],
+        ["content:write"],
+        7,
+        True,
+    )
+    assert (await repo.authenticate(client.id, secret)).id == client.id
+    assert await repo.authenticate(client.id, "wrong") is None
+    assert [c.id for c in await repo.all()] == [client.id]
+
+    assert await repo.revoke(client.id) is True
+    assert await repo.authenticate(client.id, secret) is None
+    assert await repo.delete(client.id) is True
+    assert await repo.find(client.id) is None
+
+
+async def test_public_client_has_no_secret(orm_database):
+    repo = OrmClientRepository(orm_database, hasher=BcryptHasher(rounds=4))
+    client, secret = await repo.register(name="spa", confidential=False)
+    assert secret is None
+    assert (await repo.authenticate(client.id, None)).id == client.id
 
 
 async def test_rollback_drops_every_table(orm_database):

@@ -25,6 +25,15 @@ Release notes are also published on
 - Migration `add_resource_to_oauth_tables` adds a nullable `resource` column to
   `oauth_auth_codes` and `oauth_refresh_tokens`; publish and run it when using the
   ORM store.
+- ORM client registry: `AuthConfig.clients = {"store": "orm"}` keeps OAuth
+  clients in the new `oauth_clients` table (bcrypt-hashed secrets) through the
+  async `OrmClientRepository`. Routes, the manager and the async grants accept a
+  sync or async client store.
+- `Client.scopes` limits the scopes a client may request (`invalid_scope`
+  otherwise); `Client.owner_id` records who registered it. Client repositories
+  gain `revoke`.
+- `AuthManager.client_owner_provider(client)` and `owner_provider_async`;
+  `password_grant` accepts an already resolved `client`.
 
 ### Changed
 

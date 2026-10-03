@@ -82,6 +82,12 @@ class AuthConfig:
         "store": "memory",
     }
 
+    # --- OAuth client registry -------------------------------------------
+    # "memory" (default), "orm" (``oauth_clients`` table), or "instance".
+    clients: dict[str, Any] = {
+        "store": "memory",
+    }
+
     # --- JWT / token settings (overridable) ----------------------------
     key: str | None = None
     algorithm: str = "HS256"

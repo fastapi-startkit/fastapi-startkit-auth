@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..concurrency import call, ensure_sync
+from ..concurrency import call, ensure_sync, resolve
 from ..exceptions import InvalidGrant
 from ..providers.base import active_user, active_user_async
 from ..tokens.service import IssuedToken, TokenService
@@ -70,5 +70,5 @@ class AsyncRefreshTokenGrant:
     ) -> IssuedToken:
         record = await call(self._tokens.repository.find_refresh_token, refresh_token)
         if record is not None and record.active:
-            await ensure_owner_active_async(self._owner_provider(record.client_id), record.user_id)
+            await ensure_owner_active_async(await resolve(self._owner_provider(record.client_id)), record.user_id)
         return await call(self._tokens.refresh, refresh_token, scopes=scopes, resource=resource)

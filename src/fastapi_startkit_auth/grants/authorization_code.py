@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from ..clients.models import Client
-from ..concurrency import call
+from ..concurrency import call, resolve
 from ..exceptions import InvalidGrant, InvalidRequest
 from ..policy import GrantPolicy, ensure_same_resource
 from ..tokens.service import IssuedToken, TokenService
@@ -26,6 +26,7 @@ def _new_code(
         raise InvalidRequest("A PKCE code_challenge is required for public clients.")
     policy.check_pkce_method(code_challenge, code_challenge_method)
     policy.check_scopes(scopes)
+    policy.check_client_scopes(client, scopes)
     policy.check_resource(resource)
     return secrets.token_urlsafe(40)
 
@@ -178,7 +179,7 @@ class AsyncAuthorizationCodeGrant:
     ) -> IssuedToken:
         record = await call(self._tokens.repository.pull_auth_code, code)
         _validate_exchange(record, client, redirect_uri, code_verifier, client_authenticated, resource)
-        await ensure_owner_active_async(self._owner_provider(client.id), record.user_id)
+        await ensure_owner_active_async(await resolve(self._owner_provider(client.id)), record.user_id)
         return await call(
             self._tokens.issue,
             user_id=record.user_id,

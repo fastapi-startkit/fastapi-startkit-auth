@@ -182,3 +182,37 @@ def test_token_endpoint_accepts_the_resource_parameter():
     )
     assert refused.status_code == 400
     assert refused.json()["error"] == "invalid_target"
+
+
+def test_client_allowed_scopes_are_enforced(manager, s256):
+    limited = Client(id="lim", name="lim", confidential=False, redirect_uris=["https://spa/cb"], scopes=["read"])
+
+    assert _exchange(manager, limited, _code(manager, limited, s256)).scopes == ["read"]
+    with pytest.raises(InvalidScope):
+        _code(manager, limited, s256, scopes=("read", "content:write"))
+    with pytest.raises(InvalidScope):
+        manager.client_credentials_grant().handle(
+            client=Client(id="svc", name="svc", scopes=["read"]), scopes=["content:write"]
+        )
+
+
+def test_password_route_enforces_client_scopes():
+    application = Application([(AuthProvider, _config())])
+    client = TestClient(application.api)
+    registered, secret = application.api.state.auth_manager.client_repository.register(
+        name="cli", grant_types=["password"], scopes=["read"]
+    )
+
+    response = client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "password",
+            "username": "ada@example.com",
+            "password": "secret",
+            "scope": "content:write",
+            "client_id": registered.id,
+            "client_secret": secret,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_scope"

@@ -74,8 +74,8 @@ def _client_credentials_from_request(
     return client_id, client_secret
 
 
-def _authenticate_client(manager: AuthManager, client_id: str, secret: str | None, grant: str) -> Client:
-    client = manager.client_repository.authenticate(client_id, secret)
+async def _authenticate_client(manager: AuthManager, client_id: str, secret: str | None, grant: str) -> Client:
+    client = await call(manager.client_repository.authenticate, client_id, secret)
     if client is None:
         raise InvalidClient("Client authentication failed.")
     if not client.allows_grant(grant):
@@ -83,14 +83,14 @@ def _authenticate_client(manager: AuthManager, client_id: str, secret: str | Non
     return client
 
 
-def _require_authenticated_client(
+async def _require_authenticated_client(
     manager: AuthManager, request: Request, client_id: str | None, client_secret: str | None
 ) -> Client:
     """Authenticate the calling client for the introspection/revocation endpoints."""
     client_id, client_secret = _client_credentials_from_request(request, client_id, client_secret)
     if not client_id:
         raise InvalidClient("Client authentication is required.")
-    client = manager.client_repository.authenticate(client_id, client_secret)
+    client = await call(manager.client_repository.authenticate, client_id, client_secret)
     if client is None:
         raise InvalidClient("Client authentication failed.")
     return client
@@ -121,10 +121,12 @@ def build_router(prefix: str = "") -> APIRouter:
         scopes = _scopes(scope)
 
         if grant_type == "password":
+            client = None
             if client_id:
-                _authenticate_client(manager, client_id, client_secret, "password")
+                client = await _authenticate_client(manager, client_id, client_secret, "password")
+                manager.grant_policy.check_client_scopes(client, scopes)
             issued = await call(
-                manager.password_grant(client_id=client_id).handle,
+                manager.password_grant(client=client).handle,
                 username=username or "",
                 password=password or "",
                 scopes=scopes,
@@ -135,7 +137,7 @@ def build_router(prefix: str = "") -> APIRouter:
         if grant_type == "client_credentials":
             if not client_id:
                 raise InvalidClient("client_id is required for the client_credentials grant.")
-            client = _authenticate_client(manager, client_id, client_secret, "client_credentials")
+            client = await _authenticate_client(manager, client_id, client_secret, "client_credentials")
             issued = await call(
                 manager.client_credentials_grant().handle, client=client, scopes=scopes, resource=resource
             )
@@ -145,7 +147,7 @@ def build_router(prefix: str = "") -> APIRouter:
             if not refresh_token:
                 raise InvalidRequest("refresh_token is required.")
             if client_id:
-                _authenticate_client(manager, client_id, client_secret, "refresh_token")
+                await _authenticate_client(manager, client_id, client_secret, "refresh_token")
             issued = await call(
                 manager.refresh_grant().handle,
                 refresh_token=refresh_token,
@@ -159,12 +161,12 @@ def build_router(prefix: str = "") -> APIRouter:
                 raise InvalidRequest("code is required.")
             if not client_id:
                 raise InvalidClient("client_id is required for the authorization_code grant.")
-            client = manager.client_repository.find(client_id)
+            client = await call(manager.client_repository.find, client_id)
             if client is None:
                 raise InvalidClient("Unknown client.")
             client_authenticated = False
             if client.confidential:
-                _authenticate_client(manager, client_id, client_secret, "authorization_code")
+                await _authenticate_client(manager, client_id, client_secret, "authorization_code")
                 client_authenticated = True
             issued = await call(
                 manager.authorization_code_grant().handle,
@@ -199,13 +201,13 @@ def build_router(prefix: str = "") -> APIRouter:
         user=Depends(current_user),
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
-        client = manager.client_repository.find(body.client_id)
+        client = await call(manager.client_repository.find, body.client_id)
         if client is None:
             raise InvalidClient("Unknown client.")
         if body.redirect_uri is not None and not client.allows_redirect(body.redirect_uri):
             raise InvalidRequest("redirect_uri is not registered for this client.")
         provider = manager.guard().provider
-        if manager.owner_provider(client.id) is not provider:
+        if manager.client_owner_provider(client) is not provider:
             raise UnauthorizedClient("This client does not act for users of the authenticated provider.")
         user_id = provider.get_identifier(user)
         code = await call(
@@ -236,7 +238,7 @@ def build_router(prefix: str = "") -> APIRouter:
         client_secret: str | None = Form(None),
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
-        _require_authenticated_client(manager, request, client_id, client_secret)
+        await _require_authenticated_client(manager, request, client_id, client_secret)
         return await manager.introspect(token)
 
     # --- revocation (RFC 7009) ----------------------------------------
@@ -249,7 +251,7 @@ def build_router(prefix: str = "") -> APIRouter:
         client_secret: str | None = Form(None),
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
-        _require_authenticated_client(manager, request, client_id, client_secret)
+        await _require_authenticated_client(manager, request, client_id, client_secret)
         svc = manager.token_service
         # Try refresh first when hinted; otherwise decode as an access token.
         if token_type_hint == "refresh_token":
@@ -268,7 +270,8 @@ def build_router(prefix: str = "") -> APIRouter:
         body: ClientCreate,
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
-        client, secret = manager.client_repository.register(
+        client, secret = await call(
+            manager.client_repository.register,
             name=body.name,
             redirect_uris=body.redirect_uris,
             confidential=body.confidential,
@@ -293,12 +296,12 @@ def build_router(prefix: str = "") -> APIRouter:
                 "confidential": c.confidential,
                 "grant_types": c.grant_types,
             }
-            for c in manager.client_repository.all()
+            for c in await call(manager.client_repository.all)
         ]
 
     @router.delete("/oauth/clients/{client_id}", status_code=204)
     async def delete_client(client_id: str, manager: AuthManager = Depends(get_auth_manager)) -> Response:
-        manager.client_repository.delete(client_id)
+        await call(manager.client_repository.delete, client_id)
         return Response(status_code=204)
 
     # --- personal access tokens ---------------------------------------
