@@ -363,3 +363,18 @@ def test_repeated_resource_is_refused():
     )
     assert response.status_code == 400
     assert response.json()["error"] == "invalid_target"
+
+
+def test_empty_resource_is_treated_as_absent():
+    application = Application([(AuthProvider, _config())])
+    client = TestClient(application.api)
+    registered, secret = application.api.state.auth_manager.client_repository.register(
+        name="svc", grant_types=["client_credentials"]
+    )
+
+    response = client.post(
+        "/oauth/token",
+        data={"grant_type": "client_credentials", "client_id": registered.id, "client_secret": secret, "resource": ""},
+    )
+    assert response.status_code == 200, response.text
+    assert "aud" not in application.api.state.auth_manager.token_service.introspect(response.json()["access_token"])
