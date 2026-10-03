@@ -85,11 +85,27 @@ class AuthConfig:
     # --- JWT / token settings (overridable) ----------------------------
     key: str | None = None
     algorithm: str = "HS256"
-    access_token_ttl: int = 3600            # 1 hour
-    refresh_token_ttl: int = 60 * 60 * 24 * 14   # 14 days
+    access_token_ttl: int = 3600  # 1 hour
+    refresh_token_ttl: int = 60 * 60 * 24 * 14  # 14 days
     personal_access_token_ttl: int = 60 * 60 * 24 * 365  # 1 year
-    authorization_code_ttl: int = 600       # 10 minutes
+    authorization_code_ttl: int = 600  # 10 minutes
     bcrypt_rounds: int = 12
+
+    # --- OAuth authorization-server policy --------------------------------
+    # ``issuer`` adds an ``iss`` claim to access tokens and requires it on
+    # decode (tokens minted before it was set stop validating). ``resources``
+    # lists the RFC 8707 resource indicators clients may request; a granted
+    # resource becomes the token's ``aud``, and only a guard declaring that
+    # ``audience`` accepts it. ``scopes`` is the scope catalog (name ->
+    # description); empty accepts any scope. ``pkce_methods`` restricts
+    # ``code_challenge_method`` (OAuth 2.1 / MCP: ``["S256"]``) and
+    # ``require_pkce`` demands a challenge from confidential clients too.
+    # Never list ``"*"`` in an MCP scope catalog: it grants every ability.
+    issuer: str | None = None
+    resources: list[str] = []
+    scopes: dict[str, str] = {}
+    pkce_methods: list[str] = ["S256", "plain"]
+    require_pkce: bool = False
 
     # Called as ``notifier(email, token)`` when a reset link is requested so the
     # app can deliver the token (e.g. email it). The plaintext token is NEVER put

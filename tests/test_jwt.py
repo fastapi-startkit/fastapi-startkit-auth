@@ -55,3 +55,25 @@ def test_each_token_has_unique_jti():
     a = enc.decode(enc.encode({"sub": "1"}, ttl_seconds=60))
     b = enc.decode(enc.encode({"sub": "1"}, ttl_seconds=60))
     assert a["jti"] != b["jti"]
+
+
+def test_issuer_is_stamped_and_verified():
+    enc = make_encoder(issuer="https://auth.example.com")
+    token = enc.encode({"sub": "1"}, ttl_seconds=60)
+    assert enc.decode(token)["iss"] == "https://auth.example.com"
+    with pytest.raises(InvalidToken):
+        make_encoder(issuer="https://other.example.com").decode(token)
+
+
+def test_audience_is_verified_both_ways():
+    enc = make_encoder()
+    bound = enc.encode({"sub": "1", "aud": "https://api/mcp"}, ttl_seconds=60)
+    plain = enc.encode({"sub": "1"}, ttl_seconds=60)
+    assert enc.decode(bound, audience="https://api/mcp")["aud"] == "https://api/mcp"
+    assert enc.decode(bound, verify_audience=False)["sub"] == "1"
+    with pytest.raises(InvalidToken):
+        enc.decode(bound)
+    with pytest.raises(InvalidToken):
+        enc.decode(bound, audience="https://api/other")
+    with pytest.raises(InvalidToken):
+        enc.decode(plain, audience="https://api/mcp")

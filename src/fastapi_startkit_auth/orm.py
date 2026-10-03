@@ -77,6 +77,7 @@ class AuthRefreshToken(_AuthModel):
     expires_at: float
     revoked: bool
     created_at: float
+    resource: str
 
 
 class AuthCode(_AuthModel):
@@ -91,6 +92,7 @@ class AuthCode(_AuthModel):
     code_challenge: str
     code_challenge_method: str
     expires_at: float
+    resource: str
 
 
 def query(model: type[Model], connection: str | None = None) -> Any:

@@ -75,7 +75,7 @@ def test_provider_publishes_cors_stub_under_the_auth_key(startkit_module):
 
     assert provider.provider_key == "auth"  # `provider:publish -p auth`
     migrations = sorted((CORS_STUB.parent / "migrations").glob("*.py"))
-    assert len(migrations) == 5
+    assert len(migrations) == 6
     assert app.published_resources == {
         "auth": {
             str(CORS_STUB): "config/cors.py",

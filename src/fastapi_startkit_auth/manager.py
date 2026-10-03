@@ -18,6 +18,7 @@ from .guards.session import AsyncSessionGuard, SessionGuard
 from .guards.token import AsyncTokenGuard, TokenGuard
 from .passwords.broker import AsyncPasswordBroker, PasswordBroker
 from .passwords.repository import InMemoryPasswordResetRepository
+from .policy import GrantPolicy
 from .providers.base import UserProvider, active_user_async, is_async_provider
 from .providers.memory import InMemoryUserProvider
 from .providers.model import AsyncModelUserProvider, ModelUserProvider
@@ -65,7 +66,13 @@ class AuthManager:
                 "Tokens will be invalidated on restart. Set a stable key in production.",
                 stacklevel=2,
             )
-        self.encoder = JWTEncoder(secret=key, algorithm=cfg.get("algorithm", "HS256"))
+        self.encoder = JWTEncoder(secret=key, algorithm=cfg.get("algorithm", "HS256"), issuer=cfg.get("issuer"))
+        self.grant_policy = GrantPolicy(
+            scopes=frozenset(cfg.get("scopes", {})),
+            resources=frozenset(cfg.get("resources", [])),
+            pkce_methods=frozenset(cfg.get("pkce_methods", ["S256", "plain"])),
+            require_pkce=bool(cfg.get("require_pkce", False)),
+        )
 
         self.tokens_config = {**AuthConfig.tokens, **cfg.get("tokens", {})}
         self.token_repository = self._build_token_repository()
@@ -158,8 +165,15 @@ class AuthManager:
 
     def _build_passport_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
+        audience = spec.get("audience")
+        if audience is not None and audience not in self.grant_policy.resources:
+            warnings.warn(
+                f"Guard {name!r} requires audience {audience!r}, which AuthConfig.resources does not list; "
+                "no token can be issued for it.",
+                stacklevel=2,
+            )
         guard_class = AsyncPassportGuard if is_async_provider(provider) or self._tokens_async() else PassportGuard
-        return guard_class(name=name, token_service=self.token_service, provider=provider)
+        return guard_class(name=name, token_service=self.token_service, provider=provider, audience=audience)
 
     def _build_session_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
@@ -367,12 +381,12 @@ class AuthManager:
         if provider is None:
             provider = self.guard(guard).provider
         if self._grants_async(provider):
-            return AsyncPasswordGrant(self.token_service, provider)
-        return PasswordGrant(self.token_service, provider)
+            return AsyncPasswordGrant(self.token_service, provider, self.grant_policy)
+        return PasswordGrant(self.token_service, provider, self.grant_policy)
 
     def client_credentials_grant(self) -> ClientCredentialsGrant | AsyncClientCredentialsGrant:
         grant_class = AsyncClientCredentialsGrant if self._tokens_async() else ClientCredentialsGrant
-        return grant_class(self.token_service)
+        return grant_class(self.token_service, self.grant_policy)
 
     def refresh_grant(self) -> RefreshTokenGrant | AsyncRefreshTokenGrant:
         grant_class = AsyncRefreshTokenGrant if self._owner_grants_async() else RefreshTokenGrant
@@ -384,6 +398,7 @@ class AuthManager:
             self.token_service,
             code_ttl=self._config.get("authorization_code_ttl", 600),
             owner_provider=self.owner_provider,
+            policy=self.grant_policy,
         )
 
     async def introspect(self, access_token: str) -> dict[str, Any]:

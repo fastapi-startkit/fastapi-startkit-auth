@@ -46,11 +46,13 @@ class RefreshTokenGrant:
         self._tokens = token_service
         self._owner_provider = owner_resolver(user_provider, owner_provider)
 
-    def handle(self, *, refresh_token: str, scopes: list[str] | None) -> IssuedToken:
+    def handle(
+        self, *, refresh_token: str, scopes: list[str] | None, resource: str | None = None
+    ) -> IssuedToken:
         record = ensure_sync(self._tokens.repository.find_refresh_token(refresh_token), "find_refresh_token")
         if record is not None and record.active:
             ensure_owner_active(self._owner_provider(record.client_id), record.user_id)
-        return self._tokens.refresh(refresh_token, scopes=scopes)
+        return self._tokens.refresh(refresh_token, scopes=scopes, resource=resource)
 
 
 class AsyncRefreshTokenGrant:
@@ -63,8 +65,10 @@ class AsyncRefreshTokenGrant:
         self._tokens = token_service
         self._owner_provider = owner_resolver(user_provider, owner_provider)
 
-    async def handle(self, *, refresh_token: str, scopes: list[str] | None) -> IssuedToken:
+    async def handle(
+        self, *, refresh_token: str, scopes: list[str] | None, resource: str | None = None
+    ) -> IssuedToken:
         record = await call(self._tokens.repository.find_refresh_token, refresh_token)
         if record is not None and record.active:
             await ensure_owner_active_async(self._owner_provider(record.client_id), record.user_id)
-        return await call(self._tokens.refresh, refresh_token, scopes=scopes)
+        return await call(self._tokens.refresh, refresh_token, scopes=scopes, resource=resource)

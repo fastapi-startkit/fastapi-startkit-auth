@@ -69,6 +69,7 @@ class InMemoryTokenRepository:
         client_id: str | None,
         scopes: list[str],
         expires_at: float | None,
+        resource: str | None = None,
     ) -> RefreshTokenRecord:
         rec = RefreshTokenRecord(
             token_id=token_id,
@@ -77,6 +78,7 @@ class InMemoryTokenRepository:
             client_id=client_id,
             scopes=list(scopes),
             expires_at=expires_at,
+            resource=resource,
         )
         self._refresh[token_id] = rec
         return rec
@@ -103,6 +105,7 @@ class InMemoryTokenRepository:
         code_challenge: str | None,
         code_challenge_method: str | None,
         expires_at: float,
+        resource: str | None = None,
     ) -> AuthorizationCode:
         rec = AuthorizationCode(
             code=code,
@@ -113,6 +116,7 @@ class InMemoryTokenRepository:
             code_challenge=code_challenge,
             code_challenge_method=code_challenge_method,
             expires_at=expires_at,
+            resource=resource,
         )
         self._codes[code] = rec
         return rec

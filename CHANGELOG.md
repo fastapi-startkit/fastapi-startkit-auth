@@ -7,12 +7,39 @@ Release notes are also published on
 
 ## [Unreleased]
 
+### Added
+
+- RFC 8707 resource indicators: `AuthConfig.resources` lists the resources tokens
+  may be bound to. The token endpoint and `/oauth/authorize` accept `resource`;
+  the code and refresh token remember it and the access token carries it as `aud`.
+  Unknown or mismatched resources fail with `invalid_target`.
+- Guards accept an `audience`: a passport guard with `"audience": "<uri>"` only
+  accepts tokens bound to that resource, and resource-bound tokens are refused by
+  guards without it.
+- `AuthConfig.issuer` stamps and verifies the `iss` claim.
+- `AuthConfig.scopes` is a scope catalog: when set, grants refuse unknown scopes
+  with `invalid_scope`.
+- `AuthConfig.pkce_methods` restricts `code_challenge_method` (e.g. `["S256"]`),
+  compared case-insensitively; an unknown `code_challenge_method` is now refused
+  at `/oauth/authorize` with `invalid_request`.
+- `AuthConfig.require_pkce` demands a `code_challenge` from confidential clients
+  too (OAuth 2.1 / MCP).
+- A repeated `resource` parameter on the token endpoint fails with `invalid_target`.
+- Building a guard whose `audience` is not listed in `AuthConfig.resources` emits
+  a `UserWarning`.
+- `GrantPolicy`, `InvalidScope` and `InvalidTarget` are exported; introspection
+  reports `aud` and `iss` when present.
+- Migration `add_resource_to_oauth_tables` adds a nullable `resource` column to
+  `oauth_auth_codes` and `oauth_refresh_tokens`; publish and run it when using the
+  ORM store.
+
 ### Changed
 
 - **Breaking:** persistence now goes through the fastapi-startkit ORM with models
   shipped in `fastapi_startkit_auth.orm`; no raw SQL remains. Use
   `{"store": "orm"}` (optional ORM `connection` name) for sessions, API tokens and
   OAuth tokens.
+- Requires `pyjwt>=2.10.1`.
 - **Breaking:** the `startkit` extra now requires `fastapi-startkit[database]>=0.60`.
 - Run the published migrations (`provider:publish -p auth`, then `migrate`) to
   create the tables; stores no longer create tables themselves.
