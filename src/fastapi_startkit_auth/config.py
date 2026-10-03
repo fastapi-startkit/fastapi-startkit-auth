@@ -91,6 +91,19 @@ class AuthConfig:
     authorization_code_ttl: int = 600       # 10 minutes
     bcrypt_rounds: int = 12
 
+    # --- OAuth authorization-server policy --------------------------------
+    # ``issuer`` adds an ``iss`` claim to access tokens and requires it on
+    # decode (tokens minted before it was set stop validating). ``resources``
+    # lists the RFC 8707 resource indicators clients may request; a granted
+    # resource becomes the token's ``aud``, and only a guard declaring that
+    # ``audience`` accepts it. ``scopes`` is the scope catalog (name ->
+    # description); empty accepts any scope. ``pkce_methods`` restricts
+    # ``code_challenge_method`` (OAuth 2.1 / MCP: ``["S256"]``).
+    issuer: str | None = None
+    resources: list[str] = []
+    scopes: dict[str, str] = {}
+    pkce_methods: list[str] = ["S256", "plain"]
+
     # Called as ``notifier(email, token)`` when a reset link is requested so the
     # app can deliver the token (e.g. email it). The plaintext token is NEVER put
     # in the HTTP response unless ``debug_expose_reset_token`` is explicitly True.

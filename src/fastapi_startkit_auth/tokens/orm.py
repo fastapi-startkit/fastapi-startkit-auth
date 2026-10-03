@@ -89,6 +89,7 @@ class OrmTokenRepository:
         client_id: str | None,
         scopes: list[str],
         expires_at: float | None,
+        resource: str | None = None,
     ) -> RefreshTokenRecord:
         record = RefreshTokenRecord(
             token_id=token_id,
@@ -97,6 +98,7 @@ class OrmTokenRepository:
             client_id=client_id,
             scopes=list(scopes),
             expires_at=expires_at,
+            resource=resource,
         )
         await self._refresh().insert(
             {
@@ -108,6 +110,7 @@ class OrmTokenRepository:
                 "expires_at": record.expires_at,
                 "revoked": record.revoked,
                 "created_at": record.created_at,
+                "resource": record.resource,
             }
         )
         return record
@@ -126,6 +129,7 @@ class OrmTokenRepository:
             expires_at=data["expires_at"],
             revoked=bool(data["revoked"]),
             created_at=data["created_at"],
+            resource=data["resource"],
         )
 
     async def revoke_refresh_token(self, token_id: str) -> bool:
@@ -146,6 +150,7 @@ class OrmTokenRepository:
         code_challenge: str | None,
         code_challenge_method: str | None,
         expires_at: float,
+        resource: str | None = None,
     ) -> AuthorizationCode:
         record = AuthorizationCode(
             code=code,
@@ -156,6 +161,7 @@ class OrmTokenRepository:
             code_challenge=code_challenge,
             code_challenge_method=code_challenge_method,
             expires_at=expires_at,
+            resource=resource,
         )
         await self._codes().insert(
             {
@@ -167,6 +173,7 @@ class OrmTokenRepository:
                 "code_challenge": record.code_challenge,
                 "code_challenge_method": record.code_challenge_method,
                 "expires_at": record.expires_at,
+                "resource": record.resource,
             }
         )
         return record
@@ -189,6 +196,7 @@ class OrmTokenRepository:
             code_challenge=data["code_challenge"],
             code_challenge_method=data["code_challenge_method"],
             expires_at=data["expires_at"],
+            resource=data["resource"],
         )
 
     async def purge_expired(self) -> None:

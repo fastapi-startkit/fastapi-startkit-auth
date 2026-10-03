@@ -155,6 +155,32 @@ async def test_auth_code_can_be_pulled_once(orm_database):
     )
 
 
+async def test_resource_round_trips_on_codes_and_refresh_tokens(orm_database):
+    repo = await token_repo(orm_database)
+    await repo.store_auth_code(
+        code="bound-code",
+        client_id="client",
+        user_id=1,
+        scopes=["read"],
+        redirect_uri=None,
+        code_challenge=None,
+        code_challenge_method=None,
+        expires_at=time.time() + 60,
+        resource="https://api/mcp",
+    )
+    await repo.store_refresh_token(
+        token_id="bound-refresh",
+        access_jti="j1",
+        user_id=1,
+        client_id="client",
+        scopes=["read"],
+        expires_at=None,
+        resource="https://api/mcp",
+    )
+    assert (await repo.pull_auth_code("bound-code")).resource == "https://api/mcp"
+    assert (await repo.find_refresh_token("bound-refresh")).resource == "https://api/mcp"
+
+
 async def test_token_purge_removes_expired_rows(orm_database):
     repo = await token_repo(orm_database)
     past = time.time() - 10

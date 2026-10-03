@@ -88,3 +88,17 @@ class ThrottleException(AuthError):
 
     error = "throttled"
     status_code = 429
+
+
+class InvalidScope(AuthError):
+    """The requested scope is unknown or not allowed."""
+
+    error = "invalid_scope"
+    status_code = 400
+
+
+class InvalidTarget(AuthError):
+    """The requested resource is unknown or does not match the grant (RFC 8707)."""
+
+    error = "invalid_target"
+    status_code = 400

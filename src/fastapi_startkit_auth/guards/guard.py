@@ -59,16 +59,21 @@ class PassportGuard:
 
     Corresponds to a ``{"driver": "passport"}`` guard entry: it pairs the shared
     :class:`TokenService` (which validates signature, expiry, and revocation)
-    with the guard's configured user provider.
+    with the guard's configured user provider. A guard with an ``audience`` only
+    accepts tokens bound to that resource, and tokens bound to a resource are only
+    accepted by a guard serving it.
     """
 
-    def __init__(self, name: str, token_service: TokenService, provider: UserProvider) -> None:
+    def __init__(
+        self, name: str, token_service: TokenService, provider: UserProvider, audience: str | None = None
+    ) -> None:
         self.name = name
         self._tokens = token_service
         self.provider = provider
+        self.audience = audience
 
     def user_from_token(self, access_token: str) -> AuthContext:
-        claims = ensure_sync(self._tokens.authenticate(access_token), "The token service's authenticate")
+        claims = ensure_sync(self._tokens.authenticate(access_token, audience=self.audience), "The token service's authenticate")
         return _context_from_claims(claims, self._resolve_user(claims.get("sub")))
 
     def _resolve_user(self, sub: Any) -> Any | None:
@@ -92,13 +97,14 @@ def _context_from_claims(claims: dict[str, Any], user: Any | None) -> AuthContex
 
 
 class AsyncPassportGuard:
-    def __init__(self, name: str, token_service: Any, provider: Any) -> None:
+    def __init__(self, name: str, token_service: Any, provider: Any, audience: str | None = None) -> None:
         self.name = name
         self._tokens = token_service
         self.provider = provider
+        self.audience = audience
 
     async def user_from_token(self, access_token: str) -> AuthContext:
-        claims = await call(self._tokens.authenticate, access_token)
+        claims = await call(self._tokens.authenticate, access_token, audience=self.audience)
         return _context_from_claims(claims, await self._resolve_user(claims.get("sub")))
 
     async def _resolve_user(self, sub: Any) -> Any | None:

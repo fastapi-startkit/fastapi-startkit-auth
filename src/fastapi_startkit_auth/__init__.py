@@ -25,9 +25,12 @@ from .exceptions import (
     InsufficientScope,
     InvalidClient,
     InvalidGrant,
+    InvalidScope,
     InvalidSession,
+    InvalidTarget,
     InvalidToken,
 )
+from .policy import GrantPolicy
 from .facade import AsyncAuth, Auth
 from .guards.guard import AsyncPassportGuard, PassportGuard
 from .guards.session import AsyncSessionGuard, SessionGuard
@@ -60,6 +63,9 @@ __all__ = (
     "InvalidClient",
     "InvalidToken",
     "InsufficientScope",
+    "InvalidScope",
+    "InvalidTarget",
+    "GrantPolicy",
     "InvalidSession",
     "CsrfTokenMismatch",
     "Auth",

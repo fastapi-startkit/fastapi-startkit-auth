@@ -42,6 +42,7 @@ class RefreshTokenRecord:
     expires_at: float | None = None
     revoked: bool = False
     created_at: float = field(default_factory=lambda: time.time())
+    resource: str | None = None
 
     @property
     def expired(self) -> bool:
@@ -62,6 +63,7 @@ class AuthorizationCode:
     code_challenge: str | None
     code_challenge_method: str | None
     expires_at: float
+    resource: str | None = None
 
     @property
     def expired(self) -> bool:

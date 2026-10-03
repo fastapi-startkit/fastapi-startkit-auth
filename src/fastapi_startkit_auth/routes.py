@@ -37,6 +37,7 @@ class AuthorizeRequest(BaseModel):
     state: str | None = None
     code_challenge: str | None = None
     code_challenge_method: str | None = "S256"
+    resource: str | None = None
 
 
 class PersonalAccessTokenCreate(BaseModel):
@@ -113,6 +114,7 @@ def build_router(prefix: str = "") -> APIRouter:
         code_verifier: str | None = Form(None),
         client_id: str | None = Form(None),
         client_secret: str | None = Form(None),
+        resource: str | None = Form(None),
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
         client_id, client_secret = _client_credentials_from_request(request, client_id, client_secret)
@@ -134,7 +136,9 @@ def build_router(prefix: str = "") -> APIRouter:
             if not client_id:
                 raise InvalidClient("client_id is required for the client_credentials grant.")
             client = _authenticate_client(manager, client_id, client_secret, "client_credentials")
-            issued = await call(manager.client_credentials_grant().handle, client=client, scopes=scopes)
+            issued = await call(
+                manager.client_credentials_grant().handle, client=client, scopes=scopes, resource=resource
+            )
             return issued.to_response()
 
         if grant_type == "refresh_token":
@@ -142,7 +146,12 @@ def build_router(prefix: str = "") -> APIRouter:
                 raise InvalidRequest("refresh_token is required.")
             if client_id:
                 _authenticate_client(manager, client_id, client_secret, "refresh_token")
-            issued = await call(manager.refresh_grant().handle, refresh_token=refresh_token, scopes=scopes or None)
+            issued = await call(
+                manager.refresh_grant().handle,
+                refresh_token=refresh_token,
+                scopes=scopes or None,
+                resource=resource,
+            )
             return issued.to_response()
 
         if grant_type == "authorization_code":
@@ -164,6 +173,7 @@ def build_router(prefix: str = "") -> APIRouter:
                 redirect_uri=redirect_uri,
                 code_verifier=code_verifier,
                 client_authenticated=client_authenticated,
+                resource=resource,
             )
             return issued.to_response()
 
@@ -206,6 +216,7 @@ def build_router(prefix: str = "") -> APIRouter:
             redirect_uri=body.redirect_uri,
             code_challenge=body.code_challenge,
             code_challenge_method=body.code_challenge_method,
+            resource=body.resource,
         )
         result: dict[str, Any] = {"code": code, "state": body.state}
         if body.redirect_uri:
@@ -245,7 +256,7 @@ def build_router(prefix: str = "") -> APIRouter:
             await call(svc.revoke_refresh, token)
             return {"revoked": True}
         try:
-            claims = svc.encoder.decode(token, verify_exp=False)
+            claims = svc.encoder.decode(token, verify_exp=False, verify_audience=False)
             await call(svc.revoke_access, claims.get("jti", ""))
         except Exception:
             await call(svc.revoke_refresh, token)
