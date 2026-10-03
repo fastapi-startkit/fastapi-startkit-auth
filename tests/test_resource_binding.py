@@ -365,16 +365,39 @@ def test_repeated_resource_is_refused():
     assert response.json()["error"] == "invalid_target"
 
 
-def test_empty_resource_is_treated_as_absent():
-    application = Application([(AuthProvider, _config())])
-    client = TestClient(application.api)
-    registered, secret = application.api.state.auth_manager.client_repository.register(
-        name="svc", grant_types=["client_credentials"]
-    )
+def test_empty_resource_is_treated_as_absent_under_the_default_config(s256):
+    users = _users()
 
-    response = client.post(
+    class Default(AuthConfig):
+        key = "resource-test-secret-key-32-bytes-minimum!"
+        bcrypt_rounds = 4
+        providers = {"users": {"driver": "instance", "instance": users}}
+
+    application = Application([(AuthProvider, Default)])
+    client = TestClient(application.api)
+    manager = application.api.state.auth_manager
+    service, secret = manager.client_repository.register(name="svc", grant_types=["client_credentials"])
+    spa, _ = manager.client_repository.register(name="spa", redirect_uris=["https://spa/cb"], confidential=False)
+
+    issued = client.post(
         "/oauth/token",
-        data={"grant_type": "client_credentials", "client_id": registered.id, "client_secret": secret, "resource": ""},
+        data={"grant_type": "client_credentials", "client_id": service.id, "client_secret": secret, "resource": ""},
     )
-    assert response.status_code == 200, response.text
-    assert "aud" not in application.api.state.auth_manager.token_service.introspect(response.json()["access_token"])
+    assert issued.status_code == 200, issued.text
+    assert "aud" not in manager.token_service.introspect(issued.json()["access_token"])
+
+    user_token = client.post(
+        "/oauth/token", data={"grant_type": "password", "username": "ada@example.com", "password": "secret"}
+    ).json()["access_token"]
+    authorized = client.post(
+        "/oauth/authorize",
+        json={
+            "client_id": spa.id,
+            "redirect_uri": "https://spa/cb",
+            "scope": "read",
+            "code_challenge": s256(VERIFIER),
+            "resource": "",
+        },
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    assert authorized.status_code == 200, authorized.text
