@@ -161,6 +161,7 @@ def build_router(prefix: str = "") -> APIRouter:
                 refresh_token=refresh_token,
                 scopes=scopes or None,
                 resource=resource,
+                client_id=client_id,
             )
             return issued.to_response()
 

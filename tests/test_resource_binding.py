@@ -5,6 +5,7 @@ from fastapi_startkit_auth import Application, AuthConfig, AuthProvider, GrantPo
 from fastapi_startkit_auth.clients.models import Client
 from fastapi_startkit_auth.exceptions import InvalidGrant, InvalidRequest, InvalidScope, InvalidTarget, InvalidToken
 from fastapi_startkit_auth.grants.authorization_code import AuthorizationCodeGrant
+from fastapi_startkit_auth.grants.refresh import AsyncRefreshTokenGrant
 from fastapi_startkit_auth.guards.guard import AsyncPassportGuard
 from fastapi_startkit_auth.manager import AuthManager
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
@@ -125,7 +126,7 @@ def test_plain_pkce_is_refused_when_only_s256_is_allowed(manager, spa):
 def test_refresh_keeps_the_audience(manager, spa, s256):
     issued = _exchange(manager, spa, _code(manager, spa, s256))
 
-    rotated = manager.refresh_grant().handle(refresh_token=issued.refresh_token, scopes=None)
+    rotated = manager.refresh_grant().handle(refresh_token=issued.refresh_token, scopes=None, client_id=spa.id)
 
     assert manager.guard("mcp").user_from_token(rotated.access_token).user["id"] == 1
 
@@ -134,7 +135,9 @@ def test_refresh_for_a_different_resource_is_refused(manager, spa, s256):
     issued = _exchange(manager, spa, _code(manager, spa, s256))
 
     with pytest.raises(InvalidTarget):
-        manager.refresh_grant().handle(refresh_token=issued.refresh_token, scopes=None, resource="https://other")
+        manager.refresh_grant().handle(
+            refresh_token=issued.refresh_token, scopes=None, resource="https://other", client_id=spa.id
+        )
 
 
 def test_client_credentials_binds_the_resource(manager):
@@ -340,7 +343,12 @@ def test_authorize_exchange_and_refresh_over_http(s256):
 
     refreshed = client.post(
         "/oauth/token",
-        data={"grant_type": "refresh_token", "refresh_token": issued.json()["refresh_token"], "resource": MCP},
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": issued.json()["refresh_token"],
+            "client_id": spa.id,
+            "resource": MCP,
+        },
     )
     assert refreshed.status_code == 200, refreshed.text
     assert manager.token_service.introspect(refreshed.json()["access_token"])["aud"] == MCP
@@ -363,3 +371,41 @@ def test_repeated_resource_is_refused():
     )
     assert response.status_code == 400
     assert response.json()["error"] == "invalid_target"
+
+
+def test_refresh_over_http_is_bound_to_the_issuing_client():
+    application = Application([(AuthProvider, _config())])
+    client = TestClient(application.api)
+    repository = application.api.state.auth_manager.client_repository
+    owner, owner_secret = repository.register(name="owner", grant_types=["password", "refresh_token"])
+    other, other_secret = repository.register(name="other", grant_types=["password", "refresh_token"])
+    issued = client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "password",
+            "username": "ada@example.com",
+            "password": "secret",
+            "client_id": owner.id,
+            "client_secret": owner_secret,
+        },
+    ).json()
+
+    def refresh(**credentials):
+        return client.post(
+            "/oauth/token",
+            data={"grant_type": "refresh_token", "refresh_token": issued["refresh_token"], **credentials},
+        )
+
+    assert refresh(client_id=other.id, client_secret=other_secret).json()["error"] == "invalid_grant"
+    assert refresh().json()["error"] == "invalid_grant"
+    assert refresh(client_id=owner.id, client_secret=owner_secret).status_code == 200
+
+
+async def test_async_refresh_is_bound_to_the_issuing_client():
+    service = AsyncTokenService(encoder=JWTEncoder(secret=_config().key), repository=InMemoryTokenRepository())
+    grant = AsyncRefreshTokenGrant(service)
+    issued = await service.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
+
+    with pytest.raises(InvalidGrant):
+        await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c2")
+    assert (await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")).access_token
