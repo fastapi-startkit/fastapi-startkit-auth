@@ -20,7 +20,8 @@ Release notes are also published on
 - `AuthConfig.scopes` is a scope catalog: when set, grants refuse unknown scopes
   with `invalid_scope`.
 - `AuthConfig.pkce_methods` restricts `code_challenge_method` (e.g. `["S256"]`),
-  compared case-insensitively.
+  compared case-insensitively; an unknown `code_challenge_method` is now refused
+  at `/oauth/authorize` with `invalid_request`.
 - `AuthConfig.require_pkce` demands a `code_challenge` from confidential clients
   too (OAuth 2.1 / MCP).
 - A repeated `resource` parameter on the token endpoint fails with `invalid_target`.
