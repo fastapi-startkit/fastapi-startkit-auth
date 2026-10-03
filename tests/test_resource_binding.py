@@ -409,3 +409,18 @@ async def test_async_refresh_is_bound_to_the_issuing_client():
     with pytest.raises(InvalidGrant):
         await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c2")
     assert (await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")).access_token
+
+
+def test_empty_resource_is_treated_as_absent():
+    application = Application([(AuthProvider, _config())])
+    client = TestClient(application.api)
+    registered, secret = application.api.state.auth_manager.client_repository.register(
+        name="svc", grant_types=["client_credentials"]
+    )
+
+    response = client.post(
+        "/oauth/token",
+        data={"grant_type": "client_credentials", "client_id": registered.id, "client_secret": secret, "resource": ""},
+    )
+    assert response.status_code == 200, response.text
+    assert "aud" not in application.api.state.auth_manager.token_service.introspect(response.json()["access_token"])

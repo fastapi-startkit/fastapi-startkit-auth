@@ -61,6 +61,7 @@ def _scopes(raw: str | None) -> list[str]:
 
 
 def _single_resource(resources: list[str] | None) -> str | None:
+    resources = [resource for resource in resources or [] if resource]
     if not resources:
         return None
     if len(resources) > 1:
