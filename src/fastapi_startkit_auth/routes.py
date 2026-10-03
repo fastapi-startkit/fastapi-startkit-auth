@@ -228,7 +228,7 @@ def build_router(prefix: str = "") -> APIRouter:
             redirect_uri=body.redirect_uri,
             code_challenge=body.code_challenge,
             code_challenge_method=body.code_challenge_method,
-            resource=body.resource,
+            resource=body.resource or None,
         )
         result: dict[str, Any] = {"code": code, "state": body.state}
         if body.redirect_uri:
