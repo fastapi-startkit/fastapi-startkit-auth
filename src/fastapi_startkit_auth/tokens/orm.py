@@ -129,13 +129,16 @@ class OrmTokenRepository:
             expires_at=data["expires_at"],
             revoked=bool(data["revoked"]),
             created_at=data["created_at"],
-            resource=data["resource"],
+            resource=data.get("resource"),
         )
 
     async def revoke_refresh_token(self, token_id: str) -> bool:
         # The conditional UPDATE is the atomic step: only the caller that flips revoked wins a rotation race.
-        updated = await self._refresh().where("token_hash", _digest(token_id)).where("revoked", False).update(
-            {"revoked": True}
+        updated = (
+            await self._refresh()
+            .where("token_hash", _digest(token_id))
+            .where("revoked", False)
+            .update({"revoked": True})
         )
         return updated > 0
 
@@ -196,7 +199,7 @@ class OrmTokenRepository:
             code_challenge=data["code_challenge"],
             code_challenge_method=data["code_challenge_method"],
             expires_at=data["expires_at"],
-            resource=data["resource"],
+            resource=data.get("resource"),
         )
 
     async def purge_expired(self) -> None:

@@ -6,7 +6,7 @@ from typing import Any
 
 from ..clients.models import Client
 from ..concurrency import call, resolve
-from ..exceptions import InvalidGrant, InvalidRequest
+from ..exceptions import InvalidGrant
 from ..policy import GrantPolicy, ensure_same_resource
 from ..tokens.service import IssuedToken, TokenService
 from ..tokens.models import AuthorizationCode
@@ -22,9 +22,7 @@ def _new_code(
     code_challenge_method: str | None,
     resource: str | None,
 ) -> str:
-    if not client.confidential and not code_challenge:
-        raise InvalidRequest("A PKCE code_challenge is required for public clients.")
-    policy.check_pkce_method(code_challenge, code_challenge_method)
+    policy.check_pkce(client.confidential, code_challenge, code_challenge_method)
     policy.check_scopes(scopes)
     policy.check_client_scopes(client, scopes)
     policy.check_resource(resource)
@@ -41,7 +39,6 @@ def _validate_exchange(
 ) -> None:
     if record is None or record.expired:
         raise InvalidGrant("The authorization code is invalid or expired.")
-    ensure_same_resource(record.resource, resource)
     if record.client_id != client.id:
         raise InvalidGrant("The authorization code was issued to a different client.")
     if record.redirect_uri != redirect_uri:
@@ -52,6 +49,7 @@ def _validate_exchange(
     if record.code_challenge:
         if not verify_pkce(code_verifier or "", record.code_challenge, record.code_challenge_method):
             raise InvalidGrant("PKCE verification failed.")
+    ensure_same_resource(record.resource, resource)
 
 
 class AuthorizationCodeGrant:

@@ -761,7 +761,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "masonite-orm", marker = "extra == 'masoniteorm'", specifier = ">=2.18" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pyjwt", specifier = ">=2.8" },
+    { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },
     { name = "python-multipart", specifier = ">=0.0.9" },

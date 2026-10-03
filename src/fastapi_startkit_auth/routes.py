@@ -15,6 +15,7 @@ from .exceptions import (
     InvalidClient,
     InvalidGrant,
     InvalidRequest,
+    InvalidTarget,
     ThrottleException,
     UnauthorizedClient,
     UnsupportedGrantType,
@@ -57,6 +58,14 @@ class ResetPasswordRequest(BaseModel):
 
 def _scopes(raw: str | None) -> list[str]:
     return [s for s in (raw or "").split() if s]
+
+
+def _single_resource(resources: list[str] | None) -> str | None:
+    if not resources:
+        return None
+    if len(resources) > 1:
+        raise InvalidTarget("Only one resource may be requested.")
+    return resources[0]
 
 
 def _client_credentials_from_request(
@@ -114,11 +123,12 @@ def build_router(prefix: str = "") -> APIRouter:
         code_verifier: str | None = Form(None),
         client_id: str | None = Form(None),
         client_secret: str | None = Form(None),
-        resource: str | None = Form(None),
+        resources: list[str] | None = Form(None, alias="resource"),
         manager: AuthManager = Depends(get_auth_manager),
     ) -> dict[str, Any]:
         client_id, client_secret = _client_credentials_from_request(request, client_id, client_secret)
         scopes = _scopes(scope)
+        resource = _single_resource(resources)
 
         if grant_type == "password":
             client = None

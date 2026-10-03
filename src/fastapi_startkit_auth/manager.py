@@ -72,6 +72,7 @@ class AuthManager:
             scopes=frozenset(cfg.get("scopes", {})),
             resources=frozenset(cfg.get("resources", [])),
             pkce_methods=frozenset(cfg.get("pkce_methods", ["S256", "plain"])),
+            require_pkce=bool(cfg.get("require_pkce", False)),
         )
 
         self.tokens_config = {**AuthConfig.tokens, **cfg.get("tokens", {})}
@@ -166,10 +167,15 @@ class AuthManager:
 
     def _build_passport_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
+        audience = spec.get("audience")
+        if audience is not None and audience not in self.grant_policy.resources:
+            warnings.warn(
+                f"Guard {name!r} requires audience {audience!r}, which AuthConfig.resources does not list; "
+                "no token can be issued for it.",
+                stacklevel=2,
+            )
         guard_class = AsyncPassportGuard if is_async_provider(provider) or self._tokens_async() else PassportGuard
-        return guard_class(
-            name=name, token_service=self.token_service, provider=provider, audience=spec.get("audience")
-        )
+        return guard_class(name=name, token_service=self.token_service, provider=provider, audience=audience)
 
     def _build_session_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
