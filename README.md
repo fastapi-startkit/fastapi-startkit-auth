@@ -20,4 +20,4 @@ If you discover a security vulnerability within FastAPI Startkit Auth, please re
 
 ## License
 
-FastAPI Startkit Auth is open-sourced software licensed under the [MIT license](LICENSE).
+FastAPI Startkit Auth is open-sourced software licensed under the [MIT license](LICENSE.md).
