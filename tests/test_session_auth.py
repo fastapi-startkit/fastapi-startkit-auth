@@ -8,23 +8,22 @@ responsibility, exactly as documented.
 import warnings
 
 import pytest
-from fastapi import Body, Depends, Request
-from fastapi.testclient import TestClient
+from fastapi import Body, Depends, FastAPI, Request
 
 from fastapi_startkit_auth import (
-    Application,
     Auth,
     AuthConfig,
-    AuthProvider,
     InvalidSession,
     current_user,
     optional_user,
 )
 from fastapi_startkit_auth.guards import Guard, PassportGuard, SessionGuard
-from fastapi_startkit_auth.manager import AuthManager
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
+from fastapi_startkit_auth import AuthMiddleware
 from fastapi_startkit_auth.sessions import InMemorySessionStore
+
+from conftest import BrowserTestClient, auth_manager, oauth2_config, register_auth
 
 COOKIE = "startkit_session"
 
@@ -44,17 +43,15 @@ def seeded_provider(users=USERS):
     return provider
 
 
-def session_config(session=None, guards=None, default_guard="web"):
+def session_config(guards=None, default_guard="web"):
     provider = seeded_provider()
 
     class Config(AuthConfig):
-        key = "session-tests-secret-key-32-bytes-min!!"
         bcrypt_rounds = 4
         default = {"guard": default_guard, "passwords": "users"}
         providers = {"users": {"driver": "instance", "instance": provider}}
 
     Config.guards = guards or {"web": {"driver": "session", "provider": "users"}}
-    Config.session = session or {}
     return Config
 
 
@@ -89,9 +86,10 @@ def wire_routes(api):
 
 
 def make_client(session=None, guards=None):
-    application = Application([(AuthProvider, session_config(session=session, guards=guards))])
-    wire_routes(application.api)
-    return TestClient(application.api, base_url="https://testserver")
+    api = FastAPI()
+    register_auth(api, session_config(guards=guards), session=session or {}, oauth2=oauth2_config())
+    wire_routes(api)
+    return BrowserTestClient(api, base_url="https://testserver")
 
 
 @pytest.fixture
@@ -99,8 +97,8 @@ def client():
     return make_client()
 
 
-def set_cookie_header(response):
-    return response.headers.get("set-cookie", "")
+def set_cookie_header(response, name=COOKIE):
+    return next((header for header in response.headers.get_list("set-cookie") if header.startswith(f"{name}=")), "")
 
 
 # --- login / logout round trip (both stores) --------------------------
@@ -210,8 +208,8 @@ def test_cookie_flags_are_configurable():
             session={"secure": False, "same_site": "strict", "cookie": "sid", "ttl": 60}
         )
     response = client.post("/login-as/1")
-    header = set_cookie_header(response).lower()
-    assert header.startswith("sid=")
+    header = set_cookie_header(response, "sid").lower()
+    assert header
     assert "secure" not in header
     assert "samesite=strict" in header
     assert "max-age=60" in header
@@ -226,7 +224,9 @@ def test_no_cookie_issued_without_session_activity(client):
 
 
 def _manager(session=None, guards=None, default_guard="web"):
-    return AuthManager(session_config(session=session, guards=guards, default_guard=default_guard))
+    return auth_manager(
+        session_config(guards=guards, default_guard=default_guard), session=session or {}, oauth2=oauth2_config()
+    )
 
 
 def test_session_driver_resolves_through_registry():
@@ -260,19 +260,19 @@ def test_session_and_passport_guards_coexist():
     assert manager.has_session_guard()
 
 
-def test_manager_without_session_guard_adds_no_middleware():
+def test_manager_without_session_guard_adds_only_the_auth_middleware():
     provider = seeded_provider()
 
     class Config(AuthConfig):
-        key = "session-tests-secret-key-32-bytes-min!!"
         bcrypt_rounds = 4
         default = {"guard": "api", "passwords": "users"}
         guards = {"api": {"driver": "passport", "provider": "users"}}
         providers = {"users": {"driver": "instance", "instance": provider}}
 
-    application = Application([(AuthProvider, Config)])
-    assert not application.auth.has_session_guard()
-    assert application.api.user_middleware == []
+    api = FastAPI()
+    manager = register_auth(api, Config, oauth2=oauth2_config())
+    assert not manager.has_session_guard()
+    assert [middleware.cls for middleware in api.user_middleware] == [AuthMiddleware]
 
 
 def test_session_store_config_selects_implementation():

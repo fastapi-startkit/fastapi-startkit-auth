@@ -4,14 +4,12 @@ Both providers hold a user with id 1, so a check against the wrong provider
 would silently pass or fail on the other provider's row.
 """
 
-import base64
-import hashlib
-
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from fastapi_startkit_auth import Application, AuthConfig, AuthProvider
+from fastapi_startkit_auth import AuthConfig
 from fastapi_startkit_auth.grants import (
     AsyncAuthorizationCodeGrant,
     AsyncRefreshTokenGrant,
@@ -20,10 +18,11 @@ from fastapi_startkit_auth.grants import (
 )
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 
+from conftest import PASSWORD_GRANTS, VERIFIER, oauth2_config, register_auth, s256_challenge
+
 HASHER = BcryptHasher(rounds=4)
 KEY = "multi-provider-secret-key-32-bytes-minimum!"
-VERIFIER = "v" * 64
-CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest()).rstrip(b"=").decode()
+CHALLENGE = s256_challenge(VERIFIER)
 
 
 def model(name):
@@ -59,11 +58,8 @@ def rows():
     Staff.rows = {1: Staff(id=1, email="root@example.com", password=HASHER.make("secret"), active=True)}
 
 
-def make_config(providers, connection=None):
-    stores = {"store": "orm", "connection": connection} if connection is not None else {"store": "memory"}
-
+def make_config(providers):
     class Config(AuthConfig):
-        key = KEY
         bcrypt_rounds = 4
         default = {"guard": "api"}
         guards = {
@@ -72,8 +68,13 @@ def make_config(providers, connection=None):
         }
 
     Config.providers = providers
-    Config.tokens = stores
     return Config
+
+
+def install(api, providers, connection=None):
+    stores = {"store": "orm", "connection": connection} if connection is not None else {"store": "memory"}
+    oauth2 = oauth2_config(key=KEY, grant_types=list(PASSWORD_GRANTS), tokens=stores)
+    return register_auth(api, make_config(providers), oauth2=oauth2)
 
 
 ASYNC_PROVIDERS = {
@@ -83,9 +84,9 @@ ASYNC_PROVIDERS = {
 
 
 async def build(connection):
-    application = Application([(AuthProvider, make_config(ASYNC_PROVIDERS, connection))])
-    manager = application.auth
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=application.api), base_url="https://testserver")
+    api = FastAPI()
+    manager = install(api, ASYNC_PROVIDERS, connection)
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="https://testserver")
     return client, manager
 
 
@@ -166,7 +167,13 @@ async def test_authorize_rejects_a_client_of_another_provider():
         user_token = (await client.post("/oauth/token", data=login)).json()["access_token"]
         authorized = await client.post(
             "/oauth/authorize",
-            json={"client_id": spa.id, "redirect_uri": "https://app/cb", "code_challenge": CHALLENGE},
+            json={
+                "client_id": spa.id,
+                "redirect_uri": "https://app/cb",
+                "code_challenge": CHALLENGE,
+                "code_challenge_method": "S256",
+                "approved": True,
+            },
             headers={"Authorization": f"Bearer {user_token}"},
         )
         assert authorized.json()["error"] == "unauthorized_client"
@@ -180,9 +187,9 @@ def sync_app():
             "users": [{"id": 1, "email": email, "password": HASHER.make("secret"), "active": True}],
         }
 
-    config = make_config({"users": memory("ada@example.com"), "staff": memory("root@example.com")})
-    application = Application([(AuthProvider, config)])
-    return TestClient(application.api), application.auth
+    api = FastAPI()
+    manager = install(api, {"users": memory("ada@example.com"), "staff": memory("root@example.com")})
+    return TestClient(api), manager
 
 
 def test_sync_refresh_rechecks_the_issuing_provider():

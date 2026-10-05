@@ -9,13 +9,11 @@ import hashlib
 import time
 
 import pytest
-from fastapi import Depends
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
-    Application,
     AuthConfig,
-    AuthProvider,
     InvalidToken,
     current_user,
     optional_user,
@@ -30,6 +28,8 @@ from fastapi_startkit_auth.apitokens.repository import (
 from fastapi_startkit_auth.guards.token import TokenGuard
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
+
+from conftest import auth_manager, oauth2_config, register_auth
 
 USERS = (
     {"id": 1, "email": "ada@example.com", "password": "secret"},
@@ -298,13 +298,11 @@ def token_config(api_tokens=None, guards=None, default=None):
     provider = seeded_provider()
 
     class Config(AuthConfig):
-        key = "api-token-tests-secret-32-bytes-minimum!"
         bcrypt_rounds = 4
         providers = {"users": {"driver": "instance", "instance": provider}}
 
     Config.default = default or {"guard": "api", "passwords": "users"}
     Config.guards = guards or {"api": {"driver": "token", "provider": "users"}}
-    Config.api_tokens = api_tokens or {}
     return Config
 
 
@@ -323,12 +321,11 @@ def wire_routes(api):
 
 
 def make_client(api_tokens=None, guards=None, default=None):
-    application = Application(
-        [(AuthProvider, token_config(api_tokens=api_tokens, guards=guards, default=default))]
-    )
-    wire_routes(application.api)
-    client = TestClient(application.api)
-    return client, application.api.state.auth_manager
+    api = FastAPI()
+    config = token_config(guards=guards, default=default)
+    manager = register_auth(api, config, oauth2=oauth2_config(), api_tokens=api_tokens or {})
+    wire_routes(api)
+    return TestClient(api), manager
 
 
 @pytest.fixture
@@ -433,17 +430,13 @@ def test_token_guard_coexists_with_passport_guard():
 
 
 def test_unknown_api_token_store_raises():
-    from fastapi_startkit_auth.manager import AuthManager
-
-    with pytest.raises(ValueError, match="Unknown api_tokens store"):
-        AuthManager(token_config(api_tokens={"store": "redis"})).api_tokens
+    with pytest.raises(ValueError, match="Unknown API token store"):
+        auth_manager(token_config(), api_tokens={"store": "redis"}).api_tokens
 
 
 def test_instance_store_is_used_verbatim():
-    from fastapi_startkit_auth.manager import AuthManager
-
     repository = InMemoryApiTokenRepository()
-    manager = AuthManager(token_config(api_tokens={"store": "instance", "instance": repository}))
+    manager = auth_manager(token_config(), api_tokens={"store": "instance", "instance": repository})
     assert manager.api_tokens.repository is repository
 
 

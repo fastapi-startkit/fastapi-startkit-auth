@@ -1,30 +1,108 @@
 """Shared test fixtures.
 
 Consolidates the PKCE ``s256`` helper and the OAuth app/``TestClient`` builders
-that were previously copy-pasted across the integration and security test
-modules. Everything stays in-memory (no DB, no network): providers use
-``InMemoryUserProvider`` and the ASGI app is driven in-process by ``TestClient``.
+used across the integration and security test modules. Everything stays
+in-memory (no DB, no network) unless a test asks for ``orm_database``.
 """
+import asyncio
 import base64
 import hashlib
 import os
+from inspect import isawaitable
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import pytest
-from fastapi import Depends
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 import fastapi_startkit_auth
 from fastapi_startkit_auth import (
-    Application,
-    AuthProvider,
+    AuthApiTokenProvider,
     AuthConfig,
+    AuthManager,
+    AuthOAuth2Provider,
+    AuthProvider,
+    AuthSessionProvider,
+    OAuth2Config,
+    OAuthClientsConfig,
     current_user,
     require_scopes,
 )
-from fastapi_startkit_auth.security.hashing import BcryptHasher
+from fastapi_startkit_auth.config import DEFAULT_GRANT_TYPES
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
+from fastapi_startkit_auth.security.hashing import BcryptHasher
+
+TEST_OAUTH_KEY = "conftest-shared-secret-key-32-bytes-minimum!"
+PASSWORD_GRANTS = [*DEFAULT_GRANT_TYPES, "password"]
+# RFC 7636 §4.1: a verifier is 43-128 unreserved characters.
+VERIFIER = "v" * 43
+
+
+class BrowserTestClient(TestClient):
+    """Echoes the XSRF-TOKEN cookie into the header, like an SPA's HTTP client."""
+
+    def request(self, method, url, **kwargs):
+        token = self.cookies.get("XSRF-TOKEN")
+        if token is not None:
+            kwargs["headers"] = {"X-XSRF-TOKEN": token, **dict(kwargs.get("headers") or {})}
+        return super().request(method, url, **kwargs)
+
+
+def oauth2_config(**overrides):
+    overrides.setdefault("key", TEST_OAUTH_KEY)
+    overrides.setdefault("clients", OAuthClientsConfig(store="memory"))
+    return OAuth2Config(**overrides)
+
+
+def register_auth(app, config, *, session=None, oauth2=None, api_tokens=None, prefix=""):
+    core = AuthProvider(config, prefix)
+    core.register(app)
+    if session is not None:
+        AuthSessionProvider(session, prefix).register(app)
+    if oauth2 is not None:
+        AuthOAuth2Provider(oauth2, prefix).register(app)
+    if api_tokens is not None:
+        AuthApiTokenProvider(api_tokens, prefix).register(app)
+    core.manager.validate()
+    return core.manager
+
+
+def auth_manager(config, *, session=None, oauth2=None, api_tokens=None):
+    manager = AuthManager(config)
+    if session is not None:
+        manager.use_sessions(session)
+    if oauth2 is not None:
+        manager.use_oauth2(oauth2)
+    if api_tokens is not None:
+        manager.use_api_tokens(api_tokens)
+    return manager
+
+
+def _register_with(manager, **attributes):
+    attributes.setdefault("redirect_uris", [])
+    registered = manager.client_repository.register(**attributes)
+    return asyncio.run(registered) if isawaitable(registered) else registered
+
+
+def register_client(test_client_or_manager, **attributes):
+    """Register an OAuth client straight on the store (the HTTP CRUD routes are gone)."""
+    manager = getattr(getattr(test_client_or_manager, "app", None), "state", None)
+    manager = manager.auth_manager if manager is not None else test_client_or_manager
+    client, secret = _register_with(manager, **attributes)
+    return {
+        "id": client.id,
+        "name": client.name,
+        "secret": secret,
+        "redirect_uris": client.redirect_uris,
+        "confidential": client.confidential,
+        "grant_types": client.grant_types,
+    }
+
+
+def s256_challenge(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
 DEFAULT_USERS = (
@@ -36,14 +114,10 @@ DEFAULT_USERS = (
 @pytest.fixture
 def s256():
     """PKCE ``S256`` code challenge for a verifier."""
-    def _s256(verifier: str) -> str:
-        digest = hashlib.sha256(verifier.encode()).digest()
-        return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-
-    return _s256
+    return s256_challenge
 
 
-def _seed_provider(users):
+def seed_provider(users=DEFAULT_USERS):
     hasher = BcryptHasher(rounds=4)
     provider = InMemoryUserProvider(hasher=hasher, username_field="email")
     for user in users:
@@ -53,11 +127,10 @@ def _seed_provider(users):
     return provider
 
 
-def _build_app(*, users, notifier, debug_expose, throttle, expire, configure_api):
-    provider = _seed_provider(users)
+def _build_app(*, users, notifier, debug_expose, throttle, expire, configure_api, oauth2=None):
+    provider = seed_provider(users)
 
     class Config(AuthConfig):
-        key = "conftest-shared-secret-key-32-bytes-minimum!"
         bcrypt_rounds = 4
         debug_expose_reset_token = debug_expose
         password_reset_notifier = staticmethod(notifier) if notifier else None
@@ -69,30 +142,32 @@ def _build_app(*, users, notifier, debug_expose, throttle, expire, configure_api
                       "expire": expire, "throttle": throttle}
         }
 
-    application = Application([(AuthProvider, Config)])
+    app = FastAPI(title="FastAPI Startkit Auth")
+    register_auth(app, Config, oauth2=oauth2 or oauth2_config(grant_types=list(PASSWORD_GRANTS)))
     if configure_api is not None:
-        configure_api(application.api)
-    return application
+        configure_api(app)
+    return app
 
 
 def make_auth_client(*, users=DEFAULT_USERS, debug_expose=False, throttle=60,
-                     expire=60, configure_api=None):
-    """Build a ``TestClient`` for a seeded OAuth app.
+                     expire=60, configure_api=None, oauth2=None):
+    """Build a ``TestClient`` for a seeded OAuth app (password grant enabled).
 
     Returns ``(client, sent)`` where ``sent`` collects ``(email, token)`` pairs
     delivered through the password-reset notifier, so tests can assert on
     out-of-band delivery without reading tokens from the HTTP response.
     """
     sent = []
-    application = _build_app(
+    app = _build_app(
         users=users,
         notifier=lambda email, token: sent.append((email, token)),
         debug_expose=debug_expose,
         throttle=throttle,
         expire=expire,
         configure_api=configure_api,
+        oauth2=oauth2,
     )
-    return TestClient(application.api), sent
+    return TestClient(app), sent
 
 
 @pytest.fixture

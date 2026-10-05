@@ -1,10 +1,11 @@
 import pytest
 
-from fastapi_startkit_auth.config import AuthConfig
-from fastapi_startkit_auth.manager import AuthManager
+from fastapi_startkit_auth.config import AuthConfig, OAuth2Config
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.exceptions import InvalidToken
+
+from conftest import PASSWORD_GRANTS, auth_manager, oauth2_config
 
 
 @pytest.fixture
@@ -14,7 +15,6 @@ def manager():
     seeded.add({"id": 1, "email": "ada@example.com", "password": hasher.make("secret")})
 
     class Config(AuthConfig):
-        key = "manager-test-secret-key-32-bytes-minimum!"
         bcrypt_rounds = 4
         default = {"guard": "api", "passwords": "users"}
         guards = {"api": {"driver": "passport", "provider": "users"}}
@@ -23,7 +23,7 @@ def manager():
             "users": {"provider": "users", "table": "password_reset_tokens", "expire": 60, "throttle": 60}
         }
 
-    return AuthManager(Config)
+    return auth_manager(Config, oauth2=oauth2_config(grant_types=list(PASSWORD_GRANTS)))
 
 
 def test_manager_resolves_default_guard(manager):
@@ -68,8 +68,7 @@ def test_manager_exposes_grants(manager):
 def test_config_defaults_are_readable_without_subclass_overrides():
     # A minimal config must still yield working token TTLs.
     class Config(AuthConfig):
-        key = "another-secret-key-that-is-32-bytes-long!"
         providers = {"users": {"driver": "instance", "instance": InMemoryUserProvider()}}
 
-    manager = AuthManager(Config)
-    assert manager.token_service.access_ttl == AuthConfig.access_token_ttl
+    manager = auth_manager(Config, oauth2=oauth2_config())
+    assert manager.token_service.access_ttl == OAuth2Config().access_token_ttl

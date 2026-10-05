@@ -56,11 +56,15 @@ def test_refresh_rotates_and_revokes_old_tokens():
     # old access token is now revoked
     with pytest.raises(InvalidToken):
         svc.authenticate(issued.access_token)
-    # old refresh token cannot be reused
-    with pytest.raises(InvalidGrant):
-        svc.refresh(issued.refresh_token)
     # new access token works
     assert svc.authenticate(rotated.access_token)["sub"] == "1"
+    # replaying the old refresh token fails and revokes the whole family
+    with pytest.raises(InvalidGrant):
+        svc.refresh(issued.refresh_token)
+    with pytest.raises(InvalidToken):
+        svc.authenticate(rotated.access_token)
+    with pytest.raises(InvalidGrant):
+        svc.refresh(rotated.refresh_token)
 
 
 def test_refresh_rejects_unknown_token():

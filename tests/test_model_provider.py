@@ -4,9 +4,10 @@ stays an optional dependency."""
 from __future__ import annotations
 
 from fastapi_startkit_auth.config import AuthConfig
-from fastapi_startkit_auth.manager import AuthManager
 from fastapi_startkit_auth.providers.model import ModelUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
+
+from conftest import auth_manager, oauth2_config
 
 
 class FakeQuery:
@@ -55,14 +56,13 @@ def test_manager_accepts_masoniteorm_driver_config():
     model, hasher = build_model()
 
     class Config(AuthConfig):
-        key = "model-provider-secret-key-32-bytes-minimum!"
         bcrypt_rounds = 4
         default = {"guard": "api", "passwords": "users"}
         guards = {"api": {"driver": "passport", "provider": "users"}}
         providers = {"users": {"driver": "masoniteorm", "model": model}}
         passwords = {"users": {"provider": "users", "expire": 60, "throttle": 60}}
 
-    manager = AuthManager(Config)
+    manager = auth_manager(Config, oauth2=oauth2_config())
     issued = manager.password_grant().handle(
         username="ada@example.com", password="secret", scopes=["read"], client_id=None
     )

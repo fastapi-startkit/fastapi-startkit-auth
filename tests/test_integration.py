@@ -1,3 +1,6 @@
+from conftest import register_client
+
+
 def get_token(client, username="ada@example.com", password="secret", scope="read write"):
     resp = client.post("/oauth/token", data={
         "grant_type": "password", "username": username, "password": password, "scope": scope,
@@ -77,10 +80,7 @@ def test_refresh_token_grant_rotates(client):
 
 # --- clients + client credentials + auth code ---------------------------
 def test_client_registration_and_client_credentials(client):
-    reg = client.post("/oauth/clients", json={"name": "svc", "confidential": True,
-                                              "grant_types": ["client_credentials"]})
-    assert reg.status_code == 201
-    data = reg.json()
+    data = register_client(client, name="svc", confidential=True, grant_types=["client_credentials"])
     assert data["secret"]
 
     resp = client.post("/oauth/token", data={
@@ -92,7 +92,7 @@ def test_client_registration_and_client_credentials(client):
 
 
 def test_client_credentials_rejects_bad_secret(client):
-    reg = client.post("/oauth/clients", json={"name": "svc", "confidential": True}).json()
+    reg = register_client(client, name="svc", confidential=True)
     resp = client.post("/oauth/token", data={
         "grant_type": "client_credentials", "client_id": reg["id"], "client_secret": "wrong",
     })
@@ -100,9 +100,7 @@ def test_client_credentials_rejects_bad_secret(client):
 
 
 def test_authorization_code_flow_with_pkce(client, s256):
-    reg = client.post("/oauth/clients", json={
-        "name": "spa", "confidential": False, "redirect_uris": ["https://spa.example/cb"],
-    }).json()
+    reg = register_client(client, name="spa", confidential=False, redirect_uris=["https://spa.example/cb"])
     user_token = get_token(client)["access_token"]
     verifier = "verifier-verifier-verifier-verifier-1234567890"
 
@@ -112,6 +110,7 @@ def test_authorization_code_flow_with_pkce(client, s256):
             "client_id": reg["id"], "redirect_uri": "https://spa.example/cb",
             "scope": "read", "state": "xyz",
             "code_challenge": s256(verifier), "code_challenge_method": "S256",
+            "approved": True,
         },
         headers={"Authorization": f"Bearer {user_token}"},
     )
@@ -128,21 +127,20 @@ def test_authorization_code_flow_with_pkce(client, s256):
 
 
 def test_authorization_endpoint_requires_authenticated_user(client):
-    reg = client.post("/oauth/clients", json={
-        "name": "spa", "confidential": False, "redirect_uris": ["https://spa.example/cb"]}).json()
+    reg = register_client(client, name="spa", confidential=False, redirect_uris=["https://spa.example/cb"])
     resp = client.post("/oauth/authorize", json={
         "client_id": reg["id"], "redirect_uri": "https://spa.example/cb", "scope": "read"})
     assert resp.status_code == 401
 
 
 # --- introspection + revocation -----------------------------------------
-def register_client(client):
-    reg = client.post("/oauth/clients", json={"name": "resource-server", "confidential": True}).json()
+def resource_server(client):
+    reg = register_client(client, name="resource-server", confidential=True)
     return {"client_id": reg["id"], "client_secret": reg["secret"]}
 
 
 def test_introspection(client):
-    creds = register_client(client)
+    creds = resource_server(client)
     token = get_token(client, scope="read")["access_token"]
     resp = client.post("/oauth/introspect", data={"token": token, **creds})
     assert resp.status_code == 200
@@ -150,7 +148,7 @@ def test_introspection(client):
 
 
 def test_revocation_makes_token_inactive(client):
-    creds = register_client(client)
+    creds = resource_server(client)
     body = get_token(client, scope="read")
     token = body["access_token"]
     assert client.post("/oauth/revoke", data={"token": token, **creds}).status_code == 200

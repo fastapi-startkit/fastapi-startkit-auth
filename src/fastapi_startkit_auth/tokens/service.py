@@ -234,6 +234,9 @@ class TokenService:
         # Held across rotation so a concurrent replay revokes the family only after the new pair has joined it.
         with self._refresh_lock():
             record = self.repository.find_refresh_token(refresh_token)
+            if record is not None and record.revoked:
+                # A replayed, rotated-out token: consuming it revokes the whole family.
+                self.repository.consume_refresh_token(refresh_token)
             new_scopes = _refreshed_scopes(record, scopes, resource, client_id)
             if self.repository.consume_refresh_token(refresh_token) is None:
                 raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
@@ -391,6 +394,9 @@ class AsyncTokenService:
         client_id: str | None = None,
     ) -> IssuedToken:
         record = await call(self.repository.find_refresh_token, refresh_token)
+        if record is not None and record.revoked:
+            # A replayed, rotated-out token: consuming it revokes the whole family.
+            await call(self.repository.consume_refresh_token, refresh_token)
         new_scopes = _refreshed_scopes(record, scopes, resource, client_id)
         # The repository's atomic consume picks one winner; replaying a used token revokes its family.
         if await call(self.repository.consume_refresh_token, refresh_token) is None:

@@ -1,12 +1,8 @@
-import base64
-import hashlib
-
 import httpx
 import pytest
-from fastapi import Body, Depends
+from fastapi import Body, Depends, FastAPI
 
 from fastapi_startkit_auth import (
-    Application,
     AsyncAuth,
     AsyncPassportGuard,
     AsyncPasswordBroker,
@@ -15,7 +11,6 @@ from fastapi_startkit_auth import (
     AsyncTokenService,
     Auth,
     AuthConfig,
-    AuthProvider,
     InvalidSession,
     current_user,
     optional_user,
@@ -28,6 +23,8 @@ from fastapi_startkit_auth.grants import (
 )
 from fastapi_startkit_auth.providers.model import AsyncModelUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
+
+from conftest import PASSWORD_GRANTS, VERIFIER, auth_manager, oauth2_config, register_auth, s256_challenge
 
 HASHER = BcryptHasher(rounds=4)
 
@@ -81,7 +78,6 @@ USER_PROVIDER = {
 
 def make_config(connection, *, default_guard="api", sent=None):
     class Config(AuthConfig):
-        key = "async-tests-secret-key-32-bytes-minimum!!"
         bcrypt_rounds = 4
         default = {"guard": default_guard, "passwords": "users"}
         guards = {
@@ -91,10 +87,6 @@ def make_config(connection, *, default_guard="api", sent=None):
         }
         providers = {"users": USER_PROVIDER}
         passwords = {"users": {"provider": "users", "table": "password_reset_tokens", "expire": 60, "throttle": 0}}
-        session = {"store": "orm", "connection": connection}
-        api_tokens = {"store": "orm", "connection": connection}
-        tokens = {"store": "orm", "connection": connection}
-        spa = {"enabled": True}
         password_reset_notifier = staticmethod(lambda email, token: sent.append((email, token))) if sent is not None else None
 
     return Config
@@ -139,10 +131,17 @@ def wire_routes(api):
 
 
 async def build(connection, **kwargs):
-    application = Application([(AuthProvider, make_config(connection, **kwargs))])
-    wire_routes(application.api)
-    manager = application.auth
-    transport = httpx.ASGITransport(app=application.api)
+    api = FastAPI()
+    store = {"store": "orm", "connection": connection}
+    manager = register_auth(
+        api,
+        make_config(connection, **kwargs),
+        session=store,
+        oauth2=oauth2_config(grant_types=list(PASSWORD_GRANTS), tokens=store, clients=store),
+        api_tokens={**store, "stateful_origins": ["https://testserver"]},
+    )
+    wire_routes(api)
+    transport = httpx.ASGITransport(app=api)
     client = httpx.AsyncClient(transport=transport, base_url="https://testserver")
     return client, manager
 
@@ -185,16 +184,17 @@ async def test_manager_selects_async_variants(app):
 @pytest.mark.parametrize("section", ["session", "api_tokens", "tokens"])
 @pytest.mark.parametrize("removed", ["sql", "async_sql"])
 def test_removed_sql_stores_point_to_the_orm_store(section, removed):
-    from fastapi_startkit_auth.manager import AuthManager
-
     class Config(AuthConfig):
-        key = "async-tests-secret-key-32-bytes-minimum!!"
         providers = {"users": {"driver": "memory", "users": []}}
 
-    setattr(Config, section, {"store": removed})
+    features = {
+        "session": {"session": {"store": removed}},
+        "api_tokens": {"api_tokens": {"store": removed}},
+        "tokens": {"oauth2": oauth2_config(tokens={"store": removed})},
+    }[section]
     attribute = {"session": "session_store", "api_tokens": "api_tokens", "tokens": "token_repository"}[section]
     with pytest.raises(ValueError, match='"orm"'):
-        getattr(AuthManager(Config), attribute)
+        getattr(auth_manager(Config, **features), attribute)
 
 
 # --- async model provider ------------------------------------------------
@@ -285,7 +285,9 @@ async def test_refresh_rotates_and_rejects_reuse(app):
 
 async def test_introspect_and_revoke(app):
     client, manager = app
-    confidential, secret = manager.client_repository.register(name="rs", grant_types=["client_credentials"])
+    confidential, secret = await manager.client_repository.register(
+        name="rs", redirect_uris=[], grant_types=["client_credentials"]
+    )
     auth = (confidential.id, secret)
     token = (await password_token(client)).json()["access_token"]
     active = await client.post("/oauth/introspect", data={"token": token}, auth=auth)
@@ -297,7 +299,9 @@ async def test_introspect_and_revoke(app):
 
 async def test_client_credentials_grant(app):
     client, manager = app
-    machine, secret = manager.client_repository.register(name="svc", grant_types=["client_credentials"])
+    machine, secret = await manager.client_repository.register(
+        name="svc", redirect_uris=[], grant_types=["client_credentials"]
+    )
     issued = await client.post(
         "/oauth/token", data={"grant_type": "client_credentials", "scope": "jobs"}, auth=(machine.id, secret)
     )
@@ -308,15 +312,16 @@ async def test_client_credentials_grant(app):
 
 async def test_authorization_code_with_pkce_is_single_use(app):
     client, manager = app
-    spa, _ = manager.client_repository.register(
+    spa, _ = await manager.client_repository.register(
         name="spa", redirect_uris=["https://app/cb"], confidential=False, grant_types=["authorization_code"]
     )
-    verifier = "v" * 64
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    verifier = VERIFIER
+    challenge = s256_challenge(verifier)
     user_token = (await password_token(client)).json()["access_token"]
     authorized = await client.post(
         "/oauth/authorize",
-        json={"client_id": spa.id, "redirect_uri": "https://app/cb", "scope": "read", "code_challenge": challenge},
+        json={"client_id": spa.id, "redirect_uri": "https://app/cb", "scope": "read", "code_challenge": challenge,
+              "code_challenge_method": "S256", "approved": True},
         headers=bearer(user_token),
     )
     code = authorized.json()["code"]

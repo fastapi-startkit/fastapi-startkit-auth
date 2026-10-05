@@ -13,7 +13,6 @@ from .apitokens.models import ApiTokenRecord
 from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
 from .concurrency import AsyncMisconfiguration
 from .clients.models import Client
-from .clients.orm import OrmClientRepository
 from .clients.repository import InMemoryClientRepository
 from .config import (
     ApiTokenConfig,
@@ -60,7 +59,6 @@ from .providers.memory import InMemoryUserProvider
 from .providers.model import AsyncModelUserProvider, ModelUserProvider
 from .sessions.facade import Session
 from .sessions.models import SessionRecord
-from .sessions.orm import OrmSessionStore
 from .sessions.store import InMemorySessionStore, SessionStore
 from .tokens.service import AsyncTokenService, TokenService
 
@@ -134,3 +132,18 @@ __all__ = (
     "AsyncTokenService",
 )
 
+
+_ORM_EXPORTS = {
+    "OrmClientRepository": ".clients.orm",
+    "OrmSessionStore": ".sessions.orm",
+}
+
+
+def __getattr__(name: str):
+    # The ORM stores need the optional fastapi-startkit framework; resolving them
+    # on access keeps plain-FastAPI installs importable.
+    if name in _ORM_EXPORTS:
+        from importlib import import_module
+
+        return getattr(import_module(_ORM_EXPORTS[name], __name__), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
