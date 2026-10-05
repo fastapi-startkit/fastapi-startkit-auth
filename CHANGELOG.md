@@ -139,6 +139,11 @@ using the ORM stores:
   `{"store": "orm"}` (optional ORM `connection` name) for sessions, API tokens and
   OAuth tokens.
 - Requires `pyjwt>=2.10.1`.
+- **Security:** refresh tokens are bound to the client they were issued to
+  (RFC 6749 §6). `RefreshTokenGrant.handle` takes `client_id` and fails with
+  `invalid_grant` when it differs from the token's client; the token endpoint
+  passes the authenticated client. Callers refreshing a client-issued token must
+  now send that client's credentials.
 - **Breaking:** the `startkit` extra now requires `fastapi-startkit[database]>=0.60`.
 - Run the published migrations (`provider:publish -p auth`, then `migrate`) to
   create the tables; stores no longer create tables themselves.
