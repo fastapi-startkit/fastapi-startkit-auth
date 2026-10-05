@@ -4,12 +4,10 @@ import json
 import time
 from typing import Any
 
-from starlette.concurrency import run_in_threadpool
-
 from .. import orm
 from ..security.hashing import BcryptHasher, Hasher
 from .models import Client
-from .repository import InMemoryClientRepository
+from .credentials import new_client, verified_client
 
 
 class OrmClientRepository:
@@ -30,18 +28,18 @@ class OrmClientRepository:
         confidential: bool = True,
         grant_types: list[str] | None = None,
         provider: str | None = None,
+        scopes: list[str] | None = None,
     ) -> tuple[Client, str | None]:
-        client, secret = await run_in_threadpool(
-            lambda: InMemoryClientRepository(self._hasher).register(
-                name=name,
-                redirect_uris=redirect_uris,
-                confidential=confidential,
-                grant_types=grant_types,
-                provider=provider,
-            )
+        client, secret = await new_client(
+            self._hasher,
+            name=name,
+            redirect_uris=redirect_uris,
+            confidential=confidential,
+            grant_types=grant_types,
+            provider=provider,
+            scopes=scopes,
         )
-        await self.add(client)
-        return client, secret
+        return await self.add(client), secret
 
     async def add(self, client: Client) -> Client:
         await self._clients().insert(
@@ -52,6 +50,7 @@ class OrmClientRepository:
                 "redirect_uris": json.dumps(client.redirect_uris),
                 "confidential": client.confidential,
                 "grant_types": json.dumps(client.grant_types),
+                "scopes": json.dumps(client.scopes),
                 "revoked": client.revoked,
                 "provider": client.provider,
                 "created_at": time.time(),
@@ -68,17 +67,7 @@ class OrmClientRepository:
         return [_client(orm.attributes(row)) for row in rows]
 
     async def authenticate(self, client_id: str, secret: str | None) -> Client | None:
-        client = await self.find(client_id)
-        if client is None or client.revoked:
-            return None
-        if not client.confidential:
-            return client
-        if secret is None or client.secret is None:
-            return None
-        # bcrypt is deliberately slow; keep it off the event loop.
-        if await run_in_threadpool(self._hasher.verify, secret, client.secret):
-            return client
-        return None
+        return await verified_client(self._hasher, await self.find(client_id), secret)
 
     async def revoke(self, client_id: str) -> bool:
         return await self._clients().where("id", client_id).update({"revoked": True}) > 0
@@ -95,6 +84,8 @@ def _client(row: dict[str, Any]) -> Client:
         redirect_uris=json.loads(row["redirect_uris"]),
         confidential=bool(row["confidential"]),
         grant_types=json.loads(row["grant_types"]),
+        # Rows written before the add_scopes migration hold NULL: unrestricted.
+        scopes=json.loads(row.get("scopes") or "[]"),
         revoked=bool(row["revoked"]),
         provider=row.get("provider"),
     )

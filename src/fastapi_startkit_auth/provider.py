@@ -31,6 +31,7 @@ OAUTH2_MIGRATIONS = (
     "add_resource_to_oauth_tables",
     "create_oauth_clients_table",
     "add_family_id_to_oauth_refresh_tokens_table",
+    "add_scopes_to_oauth_clients_table",
 )
 
 

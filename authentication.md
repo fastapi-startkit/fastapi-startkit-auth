@@ -454,14 +454,23 @@ routes were removed. Create clients as described in [Clients](#clients).
 
 A client is confidential (it has a secret) or public (an SPA or native app,
 with no secret and PKCE required). An empty `grant_types` allows every enabled
-grant.
+grant, and an empty `scopes` allows every catalog scope. A non-empty `scopes`
+limits what the client may request: anything outside it, including
+`default_scopes` filled in for a request naming none, fails with
+`invalid_scope`. `"*"` is not expanded when matching the allow-list, but a
+token granted `"*"` passes every `require_scopes` check, so never give a client
+`"*"` (the command refuses it). Tightening a client's allow-list is not
+retroactive: refresh tokens it already holds keep their granted scopes until
+their family expires or is revoked (a refresh can only narrow scopes, never widen
+them).
 
 Under Startkit, create clients with the command:
 
 ```sh
 python artisan auth:oauth2:client --name "My App" --redirect-uri https://app.example.com/callback
 python artisan auth:oauth2:client --public --name "My SPA" \
-  --redirect-uri https://spa.example.com/callback --redirect-uri http://localhost:5173/callback
+  --redirect-uri https://spa.example.com/callback --redirect-uri http://localhost:5173/callback \
+  --scopes "read write"
 ```
 
 The command:
@@ -469,6 +478,8 @@ The command:
 - prompts for anything missing
 - requires absolute redirect URIs without fragments
 - creates the client with the `authorization_code` and `refresh_token` grants
+- limits it to `--scopes` (repeatable or space-separated, checked against the
+  scope catalog); without it the client may request any scope
 - prints the secret once, for confidential clients
 
 In code, use the manager's client repository. Each call returns the client and
@@ -477,18 +488,21 @@ the plaintext secret, which is `None` for a public client:
 ```python
 manager = app.state.auth_manager  # or container.make("auth_manager") under Startkit
 
-client, secret = manager.client_repository.register(
+client, secret = await manager.client_repository.register(
     name="reporting",
     redirect_uris=[],
     confidential=True,
     grant_types=["client_credentials"],
+    scopes=["reports:read"],  # empty or omitted: any scope
     provider=None,  # an AuthConfig.providers name, for multi-provider apps
 )
 ```
 
 With the default `OAuthClientsConfig(store="database")`, clients live in the
-`oauth_clients` table through `OrmClientRepository`. Its methods are coroutines,
-so `await` them. `InMemoryClientRepository` (`store="memory"`) is synchronous.
+`oauth_clients` table through `OrmClientRepository`; `store="memory"` uses
+`InMemoryClientRepository`. Both are async, so `await` their methods. An async
+client store makes the manager build the async refresh and authorization-code
+grants.
 
 ### Authorization code with PKCE
 

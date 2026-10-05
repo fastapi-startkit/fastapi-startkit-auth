@@ -8,6 +8,8 @@ import asyncio
 import base64
 import hashlib
 import os
+import secrets
+import uuid
 from inspect import isawaitable
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -29,6 +31,7 @@ from fastapi_startkit_auth import (
     current_user,
     require_scopes,
 )
+from fastapi_startkit_auth.clients.models import Client
 from fastapi_startkit_auth.config import DEFAULT_GRANT_TYPES
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
@@ -49,9 +52,68 @@ class BrowserTestClient(TestClient):
         return super().request(method, url, **kwargs)
 
 
+class SyncClientRepository:
+    """A synchronous client store.
+
+    The shipped stores are async, which makes the manager pick the async grants;
+    this double keeps the sync grant classes covered by the suite.
+    ``authenticate`` mirrors ``verified_client`` in clients/credentials.py, the
+    source of truth; keep the two in step.
+    """
+
+    def __init__(self, hasher=None):
+        self._hasher = hasher or BcryptHasher(rounds=4)
+        self._clients = {}
+
+    def register(self, *, name, redirect_uris=None, confidential=True, grant_types=None, provider=None, scopes=None):
+        secret = secrets.token_urlsafe(40) if confidential else None
+        client = Client(
+            id=uuid.uuid4().hex,
+            name=name,
+            redirect_uris=list(redirect_uris or []),
+            confidential=confidential,
+            grant_types=list(grant_types or []),
+            provider=provider,
+            scopes=[] if scopes is None else scopes,
+        )
+        if secret is not None:
+            client.secret = self._hasher.make(secret)
+        return self.add(client), secret
+
+    def add(self, client):
+        self._clients[client.id] = client
+        return client
+
+    def find(self, client_id):
+        return self._clients.get(client_id)
+
+    def all(self):
+        return list(self._clients.values())
+
+    def authenticate(self, client_id, secret):
+        client = self._clients.get(client_id)
+        if client is None or client.revoked:
+            return None
+        if not client.confidential:
+            return client
+        if secret is None or client.secret is None:
+            return None
+        return client if self._hasher.verify(secret, client.secret) else None
+
+    def revoke(self, client_id):
+        client = self._clients.get(client_id)
+        if client is None:
+            return False
+        client.revoked = True
+        return True
+
+    def delete(self, client_id):
+        return self._clients.pop(client_id, None) is not None
+
+
 def oauth2_config(**overrides):
     overrides.setdefault("key", TEST_OAUTH_KEY)
-    overrides.setdefault("clients", OAuthClientsConfig(store="memory"))
+    overrides.setdefault("clients", OAuthClientsConfig(store="instance", instance=SyncClientRepository()))
     return OAuth2Config(**overrides)
 
 

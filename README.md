@@ -190,7 +190,7 @@ introspection re-check the token owner against it. A client without a
 client bound to a different provider with `unauthorized_client`:
 
 ```python
-client, secret = manager.client_repository.register(name="admin-panel", provider="admins")
+client, secret = await manager.client_repository.register(name="admin-panel", provider="admins")
 ```
 
 ### ORM stores and migrations
@@ -277,7 +277,7 @@ send `code_challenge_method=S256` with a 43-character challenge, and a verifier
 of 43–128 characters at exchange. A missing method means `plain`.
 
 Clients are created with `python artisan auth:oauth2:client --name app
---redirect-uri https://app/cb [--public]` or
+--redirect-uri https://app/cb [--public] [--scopes "read write"]` or
 `manager.client_repository.register(...)`; there are no `/oauth/clients` HTTP
 routes. Refresh tokens are bound to their client. Replaying a rotated refresh
 token revokes its whole family, whoever presents it; see

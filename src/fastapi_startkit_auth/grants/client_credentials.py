@@ -15,6 +15,7 @@ def _check(policy: GrantPolicy, client: Client, scopes: list[str], resource: str
         raise UnauthorizedClient("Only confidential clients may use the client_credentials grant.")
     ensure_client_may(client, "client_credentials")
     policy.check_scopes(scopes)
+    policy.check_client_scopes(client, scopes)
     policy.check_resource(resource)
 
 

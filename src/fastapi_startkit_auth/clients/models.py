@@ -13,6 +13,8 @@ class Client:
 
     ``provider`` names the ``AuthConfig.providers`` entry whose users this
     client acts for; ``None`` means the default guard's provider.
+
+    ``scopes`` lists the scopes the client may request; empty means any.
     """
 
     id: str
@@ -23,9 +25,19 @@ class Client:
     grant_types: list[str] = field(default_factory=list)
     revoked: bool = False
     provider: str | None = None
+    scopes: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # list("read") would silently become ["r", "e", "a", "d"].
+        if isinstance(self.scopes, str):
+            raise TypeError("Client.scopes must be a list of scope names, not a string.")
+        self.scopes = list(self.scopes)
 
     def allows_redirect(self, uri: str) -> bool:
         return uri in self.redirect_uris
+
+    def allows_scopes(self, scopes: list[str]) -> bool:
+        return not self.scopes or set(scopes) <= set(self.scopes)
 
     def allows_grant(self, grant_type: str) -> bool:
         if not self.grant_types:

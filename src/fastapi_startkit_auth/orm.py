@@ -106,6 +106,7 @@ class AuthOAuthClient(_AuthModel):
     redirect_uris: str
     confidential: bool
     grant_types: str
+    scopes: str
     revoked: bool
     provider: str
     created_at: float

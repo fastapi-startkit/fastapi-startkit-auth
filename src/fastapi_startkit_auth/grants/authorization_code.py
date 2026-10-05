@@ -27,6 +27,7 @@ def _validate_request(
     policy.check_redirect(client, redirect_uri)
     policy.check_pkce(client.confidential, code_challenge, code_challenge_method)
     policy.check_scopes(scopes)
+    policy.check_client_scopes(client, scopes)
     policy.check_resource(resource)
 
 

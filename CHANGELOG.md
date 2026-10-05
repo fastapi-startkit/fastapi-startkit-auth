@@ -67,6 +67,13 @@ Each item lists what changed and what to do.
 - **OAuth client store defaults to `"database"`** (the ORM `oauth_clients`
   table). *Migrate:* publish and run the migrations, or set
   `OAuth2Config(clients=OAuthClientsConfig(store="memory"))`.
+- **The in-memory OAuth client store is async.** `InMemoryClientRepository`
+  methods (`register`, `add`, `find`, `all`, `authenticate`, `revoke`,
+  `delete`) are coroutines, like `OrmClientRepository`, and `store="memory"` now
+  makes the manager build the async refresh and authorization-code grants. A
+  synchronous custom store passed with `store="instance"` keeps the sync grants.
+  *Migrate:*
+  `await` client-store calls and the `handle` / `issue_code` of those grants.
 - **Persistent stores are named `"database"`.** `store="orm"` still works for
   sessions, API tokens, OAuth tokens and OAuth clients, but emits a
   `DeprecationWarning` and will be removed in a future release. *Migrate:*
@@ -84,6 +91,8 @@ using the ORM stores:
 - `2026_10_04_000001_create_oauth_clients_table` — the `oauth_clients` table.
 - `2026_10_04_000002_add_family_id_to_oauth_refresh_tokens_table` — a nullable,
   indexed `family_id` column on `oauth_refresh_tokens`.
+- `2026_10_05_000001_add_scopes_to_oauth_clients_table` — a nullable `scopes`
+  column on `oauth_clients`; existing rows (NULL) stay unrestricted.
 
 ### Added
 
@@ -101,6 +110,14 @@ using the ORM stores:
   `authorization_guard`.
 - `OrmClientRepository` and the `auth:oauth2:client` command (`--public`,
   `--name`, repeatable `--redirect-uri`).
+- Per-client scope restrictions: `Client.scopes` lists the scopes a client may
+  request (empty means any). A request outside the list, including
+  `default_scopes` applied to a request naming none, fails with `invalid_scope`
+  on `/oauth/authorize`, the `client_credentials` grant and the password grant
+  when a client authenticates. `"*"` is not expanded when matching the allow-list, but a token granted `"*"`
+  passes every `require_scopes` check, so never give a client `"*"` (the command
+  refuses it).
+  Set it with `auth:oauth2:client --scopes`; client repositories gain `revoke`.
 - `AuthMiddleware` and request-scoped facades: `Auth.user()`, `Session.token()`,
   `ApiToken.create(...)` work on the class inside a request. `Auth.validate`
   checks credentials without logging in.
