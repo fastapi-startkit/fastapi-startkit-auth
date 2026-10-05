@@ -11,13 +11,13 @@ OAuth2 grants and signed JWT access tokens (per the
 
 | Area | What you get |
 | --- | --- |
-| **Config layer** | `AuthConfig` (`default` / `guards` / `providers` / `passwords`) + `AuthProvider` that registers into the app |
-| **Password grant** | OAuth2 password grant → signed JWT access tokens with expiry (`/oauth/token`, `/token`) |
-| **Refresh tokens** | Opaque refresh tokens with **rotation** and configurable TTL |
+| **Config layer** | `AuthConfig` (`default` / `guards` / `providers` / `passwords`) + `AuthProvider`, with `SessionConfig` / `OAuth2Config` / `ApiTokenConfig` feature providers |
+| **Password grant** | Opt-in legacy password grant → signed JWT access tokens (`/oauth/token`, `/token`) |
+| **Refresh tokens** | Client-bound opaque refresh tokens with **rotation** and reuse detection |
 | **Personal access tokens** | Named, long-lived tokens with scopes/abilities |
 | **Client credentials** | Machine-to-machine grant |
-| **Authorization code + PKCE** | Browser/SPA flow with S256 & plain PKCE |
-| **Clients** | Register / list / delete confidential & public clients |
+| **Authorization code + PKCE** | OAuth 2.1 flow with S256 PKCE, explicit consent and `iss` (RFC 9207) |
+| **Clients** | ORM client store and the `auth:oauth2:client` command |
 | **Revocation & introspection** | RFC 7009 revoke + RFC 7662 introspect |
 | **Password reset** | `password_reset_tokens` flow with configurable `expire` + `throttle` |
 | **Guards & deps** | `current_user`, `optional_user`, `require_scopes` FastAPI dependencies |
@@ -37,7 +37,7 @@ Optional extras:
 
 | Extra | Installs | Use when |
 | --- | --- | --- |
-| `startkit` | `fastapi-startkit[database]>=0.60,<1.0` (Python 3.12+) | Registering `AuthServiceProvider`, publishing its config stub and migrations via `provider:publish -p auth`, and the `"orm"` stores |
+| `startkit` | `fastapi-startkit[database]>=0.60,<1.0` (Python 3.12+) | Registering the auth providers in a Startkit app, publishing migrations via `provider:publish`, and the `"orm"` stores |
 | `masoniteorm` | `masonite-orm` | Using the `masoniteorm` user provider driver |
 
 ```bash
@@ -54,14 +54,14 @@ pins `cleo<2` while `fastapi-startkit` requires `cleo>=2.1`.
 ## Quickstart
 
 ```python
-from fastapi import Depends
-from fastapi_startkit_auth import Application, AuthProvider, AuthConfig, current_user, require_scopes
+from fastapi import Depends, FastAPI
+from fastapi_startkit_auth import (
+    AuthConfig, AuthOAuth2Provider, AuthProvider, OAuth2Config, current_user, require_scopes,
+)
 from myapp.models import User  # any active-record-style model
 
 
 class Config(AuthConfig):
-    key = "change-me-to-a-long-random-secret"   # JWT signing key
-
     default = {"guard": "api", "passwords": "users"}
     guards = {"api": {"driver": "passport", "provider": "users"}}
     providers = {"users": {"driver": "masoniteorm", "model": User}}
@@ -71,48 +71,58 @@ class Config(AuthConfig):
     }
 
 
-app = Application([(AuthProvider, Config)])
-api = app.api  # the underlying FastAPI instance
+app = FastAPI()
+AuthProvider(Config).register(app)                      # always first
+AuthOAuth2Provider(OAuth2Config(key="change-me-to-a-long-random-secret")).register(app)
 
 
-@api.get("/me")
+@app.get("/me")
 def me(user=Depends(current_user)):
     return user
 
 
-@api.get("/reports")
+@app.get("/reports")
 def reports(ctx=Depends(require_scopes("reports:read"))):
     return {"ok": True}
 ```
 
-Serve it:
-
-```bash
-uvicorn myapp:app        # Application is ASGI-callable
-uvicorn myapp:app.api    # or serve the FastAPI instance directly
-```
+In a Startkit application, list `AuthProvider` and then the feature providers
+(`AuthSessionProvider`, `AuthOAuth2Provider`, `AuthApiTokenProvider`) in the
+application's providers instead.
 
 ## Configuration
 
-`AuthConfig` mirrors Laravel's `config/auth.php` and adds JWT/token knobs:
+`AuthConfig` mirrors Laravel's `config/auth.php`: guards, user providers and
+password brokers. Each feature has its own config, handed to its provider:
+
+| Provider | Config | Enables |
+| --- | --- | --- |
+| `AuthSessionProvider` | `SessionConfig` | cookie sessions (`"session"` guards), CSRF |
+| `AuthOAuth2Provider` | `OAuth2Config` | the OAuth 2.1 server (`"passport"` guards) |
+| `AuthApiTokenProvider` | `ApiTokenConfig` | opaque API tokens (`"token"` guards), SPA mode |
 
 ```python
-class AuthConfig:
-    default   = {"guard": "api", "passwords": "users"}
-    guards    = {"api": {"driver": "passport", "provider": "users"}}
-    providers = {"users": {"driver": "masoniteorm", "model": User}}
-    passwords = {"users": {"provider": "users", "table": "password_reset_tokens",
-                            "expire": 60, "throttle": 60}}
-
-    # token settings (all optional, sensible defaults shown)
-    key                        = None          # JWT secret (required in production)
-    algorithm                  = "HS256"
-    access_token_ttl           = 3600          # seconds
-    refresh_token_ttl          = 60 * 60 * 24 * 14
-    personal_access_token_ttl  = 60 * 60 * 24 * 365
-    authorization_code_ttl     = 600
-    bcrypt_rounds              = 12
+OAuth2Config(
+    key=None,                     # JWT secret (required in production)
+    algorithm="HS256",
+    access_token_ttl=3600,
+    refresh_token_ttl=60 * 60 * 24 * 14,
+    authorization_code_ttl=600,
+    issuer=None,                  # stamps and verifies `iss`
+    resources=[],                 # RFC 8707 resource indicators
+    scopes={},                    # scope catalog; empty accepts any scope
+    default_scopes=[],
+    pkce_methods=["S256"],
+    require_pkce=True,
+    grant_types=["authorization_code", "client_credentials", "refresh_token"],
+    tokens=OAuthTokensConfig(store="memory"),
+    clients=OAuthClientsConfig(store="orm"),
+)
 ```
+
+Add `"password"` to `grant_types` to enable the legacy password grant (and the
+`/token` endpoint). The OAuth settings formerly on `AuthConfig` (`key`,
+`issuer`, `scopes`, ...) are still read from there with a `DeprecationWarning`.
 
 ### Provider drivers
 
@@ -173,18 +183,19 @@ in `fastapi-startkit[database]`). The package ships its own models
 (`fastapi_startkit_auth.orm`) and uses no raw SQL:
 
 ```python
-session = {"store": "orm"}
-api_tokens = {"store": "orm"}
-tokens = {"store": "orm", "connection": "auth"}  # optional ORM connection name
+SessionConfig(store="orm")
+ApiTokenConfig(store="orm")
+OAuth2Config(tokens=OAuthTokensConfig(store="orm", connection="auth"))  # optional ORM connection name
 ```
 
 `connection` names an entry of your database config; omit it to use the default
-connection. Publish and run the migrations once per app (they are reversible
-and create the `sessions`, `personal_api_tokens`, `oauth_access_tokens`,
-`oauth_refresh_tokens` and `oauth_auth_codes` tables with their indexes):
+connection. Publish and run the migrations once per app. Each provider
+publishes its own (all reversible and additive): sessions, personal API tokens,
+and the OAuth access/refresh token, auth code and client tables plus the
+`resource` and refresh `family_id` columns:
 
 ```bash
-python artisan provider:publish -p auth   # copies them to databases/migrations/
+python artisan provider:publish -p auth-oauth2   # copies them to databases/migrations/
 python artisan migrate
 python artisan migrate:rollback           # drops them again
 ```
@@ -212,13 +223,15 @@ one bcrypt verify, the same as a wrong password.
 
 | Method & path | Purpose |
 | --- | --- |
-| `POST /oauth/token` | Unified token endpoint: `password`, `refresh_token`, `client_credentials`, `authorization_code` |
-| `POST /token` | Simple password grant (FastAPI-tutorial style) |
-| `POST /oauth/authorize` | Approve an auth-code request (requires an authenticated user) → returns `code` |
-| `POST /oauth/introspect` | RFC 7662 token introspection (**requires client authentication**) |
-| `POST /oauth/revoke` | RFC 7009 access/refresh token revocation (**requires client authentication**) |
-| `POST/GET /oauth/clients`, `DELETE /oauth/clients/{id}` | Client registration & management |
-| `POST/GET /oauth/personal-access-tokens`, `DELETE .../{jti}` | Personal access tokens |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 server metadata |
+| `POST /oauth/token` | Token endpoint: `authorization_code`, `refresh_token`, `client_credentials` (+ `password` when enabled) |
+| `POST /token` | Simple password grant (only when `"password"` is enabled) |
+| `GET /oauth/authorize` | Validate an auth-code request for your consent screen |
+| `POST /oauth/authorize` | Issue a code once the user consents (`"approved": true`) → `code`, `iss` |
+| `POST /oauth/introspect` | RFC 7662 introspection (**confidential client authentication**) |
+| `POST /oauth/revoke` | RFC 7009 revocation of a token and its chain (**client authentication**) |
+| `GET/DELETE /oauth/tokens`, `DELETE /oauth/tokens/{jti}` | The user's OAuth tokens |
+| `POST/GET/DELETE /oauth/personal-access-tokens`, `DELETE .../{jti}` | Personal access tokens |
 | `POST /password/email` | Trigger a password-reset token (delivered out-of-band; see below) |
 | `POST /password/reset` | Reset the password with a token |
 
@@ -234,11 +247,18 @@ class AuthConfig(BaseAuthConfig):
     # debug_expose_reset_token = True   # DEV ONLY: echo the token in the response
 ```
 
-The `code_challenge` for public clients is mandatory — a public (secretless)
-client cannot obtain an authorization code without PKCE, and codes are verified
-against the `code_verifier` at exchange.
+PKCE is required by default (`require_pkce=True`, `pkce_methods=["S256"]`):
+send `code_challenge_method=S256` with a 43-character challenge, and a verifier
+of 43–128 characters at exchange. A missing method means `plain`.
+
+Clients are created with `python artisan auth:oauth2:client --name app
+--redirect-uri https://app/cb [--public]` or
+`manager.client_repository.register(...)`. Refresh tokens are bound to their
+client; replaying a rotated refresh token revokes its whole family.
 
 ### Example: password grant
+
+With `"password"` in `OAuth2Config.grant_types`:
 
 ```bash
 curl -X POST localhost:8000/oauth/token \
@@ -249,7 +269,7 @@ curl -X POST localhost:8000/oauth/token \
 
 ### Example: authorization code + PKCE
 
-1. `POST /oauth/authorize` with a bearer token and `code_challenge` → returns a single-use `code`.
+1. `POST /oauth/authorize` with the user's credentials, `approved: true`, `code_challenge` and `code_challenge_method: S256` → returns a single-use `code` and `iss`.
 2. `POST /oauth/token` with `grant_type=authorization_code`, the `code`, and the `code_verifier`.
 
 ## Scopes / abilities
