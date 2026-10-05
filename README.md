@@ -1,6 +1,6 @@
 # FastAPI Startkit Auth
 
-FastAPI Startkit Auth provides Laravel-style authentication for FastAPI: an OAuth2/JWT authorization server, cookie/session guards, SPA + CSRF protection, and API tokens.
+FastAPI Startkit Auth provides authentication for FastAPI: an OAuth2/JWT authorization server, cookie/session guards, SPA + CSRF protection, and API tokens.
 
 ## Official Documentation
 
