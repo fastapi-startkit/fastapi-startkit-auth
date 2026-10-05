@@ -2,15 +2,12 @@ import asyncio
 import inspect
 
 import pytest
-from fastapi import Body, Depends
-from fastapi.testclient import TestClient
+from fastapi import Body, Depends, FastAPI
 
 from fastapi_startkit_auth import (
     ApiTokenManager,
-    Application,
     Auth,
     AuthConfig,
-    AuthProvider,
     InvalidSession,
     PassportGuard,
     PasswordBroker,
@@ -32,6 +29,8 @@ from fastapi_startkit_auth.grants import (
 from fastapi_startkit_auth.providers.model import ModelUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
+
+from conftest import PASSWORD_GRANTS, BrowserTestClient, oauth2_config, register_auth
 
 HASHER = BcryptHasher(rounds=4)
 
@@ -77,7 +76,6 @@ def users():
 
 def sync_config(default_guard="api", sent=None):
     class Config(AuthConfig):
-        key = "sync-regression-secret-key-32-bytes!!"
         bcrypt_rounds = 4
         default = {"guard": default_guard, "passwords": "users"}
         guards = {
@@ -93,29 +91,36 @@ def sync_config(default_guard="api", sent=None):
 
 
 def build(default_guard="api", sent=None):
-    application = Application([(AuthProvider, sync_config(default_guard, sent))])
+    api = FastAPI()
+    manager = register_auth(
+        api,
+        sync_config(default_guard, sent),
+        session={},
+        oauth2=oauth2_config(grant_types=list(PASSWORD_GRANTS), tokens={"store": "memory"}),
+        api_tokens={},
+    )
 
-    @application.api.get("/me")
+    @api.get("/me")
     def me(user=Depends(current_user)):
         return {"id": user.id}
 
-    @application.api.get("/whoami")
+    @api.get("/whoami")
     def whoami(user=Depends(optional_user)):
         return {"id": user.id if user else None}
 
-    @application.api.post("/login")
+    @api.post("/login")
     def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
         if not auth.attempt(payload):
             raise InvalidSession("Invalid credentials.")
         return {"ok": True}
 
-    @application.api.post("/logout")
+    @api.post("/logout")
     def logout(auth: Auth = Depends(Auth.scoped)):
         auth.logout()
         return {"ok": True}
 
-    client = TestClient(application.api, base_url="https://testserver")
-    return client, application.auth
+    client = BrowserTestClient(api, base_url="https://testserver")
+    return client, manager
 
 
 def test_manager_builds_the_sync_classes():

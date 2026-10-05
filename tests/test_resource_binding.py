@@ -1,34 +1,43 @@
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from fastapi_startkit_auth import Application, AuthConfig, AuthProvider, GrantPolicy
+from fastapi_startkit_auth import AuthConfig, GrantPolicy
 from fastapi_startkit_auth.clients.models import Client
 from fastapi_startkit_auth.exceptions import InvalidGrant, InvalidRequest, InvalidScope, InvalidTarget, InvalidToken
 from fastapi_startkit_auth.grants.authorization_code import AuthorizationCodeGrant
 from fastapi_startkit_auth.guards.guard import AsyncPassportGuard
-from fastapi_startkit_auth.manager import AuthManager
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.security.jwt import JWTEncoder
 from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
 from fastapi_startkit_auth.tokens.service import AsyncTokenService, TokenService
 
+from conftest import PASSWORD_GRANTS, auth_manager, oauth2_config, register_auth
+
 MCP = "https://api.example.com/mcp"
 VERIFIER = "verifier-verifier-verifier-verifier-1234567890"
+KEY = "resource-test-secret-key-32-bytes-minimum!"
 
 
-def _config(**overrides):
+def _oauth2(**overrides):
+    settings = {
+        "key": KEY,
+        "issuer": "https://auth.example.com",
+        "resources": [MCP],
+        "scopes": {"read": "Read", "content:write": "Write content"},
+        "grant_types": list(PASSWORD_GRANTS),
+    }
+    return oauth2_config(**{**settings, **overrides})
+
+
+def _config():
     hasher = BcryptHasher(rounds=4)
     users = InMemoryUserProvider(hasher=hasher, username_field="email")
     users.add({"id": 1, "email": "ada@example.com", "password": hasher.make("secret")})
 
     class Config(AuthConfig):
-        key = "resource-test-secret-key-32-bytes-minimum!"
         bcrypt_rounds = 4
-        issuer = "https://auth.example.com"
-        resources = [MCP]
-        scopes = {"read": "Read", "content:write": "Write content"}
-        pkce_methods = ["S256"]
         default = {"guard": "api"}
         guards = {
             "api": {"driver": "passport", "provider": "users"},
@@ -36,14 +45,22 @@ def _config(**overrides):
         }
         providers = {"users": {"driver": "instance", "instance": users}}
 
-    for name, value in overrides.items():
-        setattr(Config, name, value)
     return Config
+
+
+def _manager(**overrides):
+    return auth_manager(_config(), oauth2=_oauth2(**overrides))
+
+
+def _app():
+    api = FastAPI()
+    manager = register_auth(api, _config(), oauth2=_oauth2())
+    return TestClient(api), manager
 
 
 @pytest.fixture
 def manager():
-    return AuthManager(_config())
+    return _manager()
 
 
 @pytest.fixture
@@ -154,17 +171,17 @@ def test_default_policy_allows_any_scope_and_no_resource():
     policy = GrantPolicy()
 
     policy.check_scopes(["anything"])
-    policy.check_pkce(False, "challenge", "plain")
+    policy.check_pkce(False, "c" * 43, "plain")
     policy.check_pkce(True, None, None)
     with pytest.raises(InvalidTarget):
         policy.check_resource(MCP)
 
 
 def test_token_endpoint_accepts_the_resource_parameter():
-    application = Application([(AuthProvider, _config())])
-    client = TestClient(application.api)
-    manager = application.api.state.auth_manager
-    registered, secret = manager.client_repository.register(name="svc", grant_types=["client_credentials"])
+    client, manager = _app()
+    registered, secret = manager.client_repository.register(
+        name="svc", redirect_uris=[], grant_types=["client_credentials"]
+    )
 
     response = client.post(
         "/oauth/token",
@@ -200,7 +217,7 @@ def _users():
 
 
 def test_default_policy_accepts_lowercase_s256(s256):
-    service = TokenService(encoder=JWTEncoder(secret=_config().key))
+    service = TokenService(encoder=JWTEncoder(secret=KEY))
     grant = AuthorizationCodeGrant(service)
     spa = Client(id="spa", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
 
@@ -240,9 +257,9 @@ def test_require_pkce_applies_to_confidential_clients():
         code_challenge_method=None,
     )
 
-    assert AuthManager(_config()).authorization_code_grant().issue_code(**request)
+    assert _manager(require_pkce=False).authorization_code_grant().issue_code(**request)
     with pytest.raises(InvalidRequest):
-        AuthManager(_config(require_pkce=True)).authorization_code_grant().issue_code(**request)
+        _manager().authorization_code_grant().issue_code(**request)
 
 
 def test_unbound_code_redeemed_with_a_resource_is_refused(manager, spa, s256):
@@ -263,7 +280,7 @@ def test_another_clients_code_fails_as_invalid_grant_before_the_resource_check(m
 def test_guard_refuses_a_wrong_or_missing_issuer(manager):
     for issuer in ("https://evil.example.com", None):
         foreign = TokenService(
-            encoder=JWTEncoder(secret=_config().key, issuer=issuer), repository=manager.token_repository
+            encoder=JWTEncoder(secret=KEY, issuer=issuer), repository=manager.token_repository
         )
         issued = foreign.issue(user_id=1, client_id="c1", scopes=["read"])
         with pytest.raises(InvalidToken):
@@ -272,7 +289,7 @@ def test_guard_refuses_a_wrong_or_missing_issuer(manager):
 
 async def test_async_service_and_guard_enforce_the_audience():
     service = AsyncTokenService(
-        encoder=JWTEncoder(secret=_config().key, issuer="https://auth.example.com"),
+        encoder=JWTEncoder(secret=KEY, issuer="https://auth.example.com"),
         repository=InMemoryTokenRepository(),
     )
     users = _users()
@@ -298,13 +315,11 @@ async def test_async_service_and_guard_enforce_the_audience():
 
 def test_guard_audience_outside_resources_warns():
     with pytest.warns(UserWarning, match="audience"):
-        AuthManager(_config(resources=[]))
+        _manager(resources=[]).guard("mcp")
 
 
 def test_authorize_exchange_and_refresh_over_http(s256):
-    application = Application([(AuthProvider, _config())])
-    client = TestClient(application.api)
-    manager = application.api.state.auth_manager
+    client, manager = _app()
     spa, _ = manager.client_repository.register(name="spa", redirect_uris=["https://spa/cb"], confidential=False)
     login = client.post(
         "/oauth/token", data={"grant_type": "password", "username": "ada@example.com", "password": "secret"}
@@ -318,6 +333,8 @@ def test_authorize_exchange_and_refresh_over_http(s256):
             "redirect_uri": "https://spa/cb",
             "scope": "read",
             "code_challenge": s256(VERIFIER),
+            "code_challenge_method": "S256",
+            "approved": True,
             "resource": MCP,
         },
         headers={"Authorization": f"Bearer {user_token}"},
@@ -340,17 +357,22 @@ def test_authorize_exchange_and_refresh_over_http(s256):
 
     refreshed = client.post(
         "/oauth/token",
-        data={"grant_type": "refresh_token", "refresh_token": issued.json()["refresh_token"], "resource": MCP},
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": issued.json()["refresh_token"],
+            "client_id": spa.id,
+            "resource": MCP,
+        },
     )
     assert refreshed.status_code == 200, refreshed.text
     assert manager.token_service.introspect(refreshed.json()["access_token"])["aud"] == MCP
 
 
 def test_repeated_resource_is_refused():
-    application = Application([(AuthProvider, _config())])
-    client = TestClient(application.api)
-    manager = application.api.state.auth_manager
-    registered, secret = manager.client_repository.register(name="svc", grant_types=["client_credentials"])
+    client, manager = _app()
+    registered, secret = manager.client_repository.register(
+        name="svc", redirect_uris=[], grant_types=["client_credentials"]
+    )
 
     response = client.post(
         "/oauth/token",
@@ -369,14 +391,17 @@ def test_empty_resource_is_treated_as_absent_under_the_default_config(s256):
     users = _users()
 
     class Default(AuthConfig):
-        key = "resource-test-secret-key-32-bytes-minimum!"
         bcrypt_rounds = 4
+        default = {"guard": "api"}
+        guards = {"api": {"driver": "passport", "provider": "users"}}
         providers = {"users": {"driver": "instance", "instance": users}}
 
-    application = Application([(AuthProvider, Default)])
-    client = TestClient(application.api)
-    manager = application.api.state.auth_manager
-    service, secret = manager.client_repository.register(name="svc", grant_types=["client_credentials"])
+    api = FastAPI()
+    manager = register_auth(api, Default, oauth2=oauth2_config(key=KEY, grant_types=list(PASSWORD_GRANTS)))
+    client = TestClient(api)
+    service, secret = manager.client_repository.register(
+        name="svc", redirect_uris=[], grant_types=["client_credentials"]
+    )
     spa, _ = manager.client_repository.register(name="spa", redirect_uris=["https://spa/cb"], confidential=False)
 
     issued = client.post(
@@ -396,6 +421,8 @@ def test_empty_resource_is_treated_as_absent_under_the_default_config(s256):
             "redirect_uri": "https://spa/cb",
             "scope": "read",
             "code_challenge": s256(VERIFIER),
+            "code_challenge_method": "S256",
+            "approved": True,
             "resource": "",
         },
         headers={"Authorization": f"Bearer {user_token}"},

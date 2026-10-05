@@ -19,6 +19,8 @@ from fastapi_startkit_auth.clients.models import Client
 from fastapi_startkit_auth.grants.authorization_code import AuthorizationCodeGrant
 from fastapi_startkit_auth.exceptions import InvalidGrant
 
+from conftest import register_client
+
 
 # --- Finding 1: password-reset token must never leak in the response -----
 def test_password_email_response_contains_no_token_by_default(auth_client):
@@ -72,8 +74,7 @@ def test_provider_dummy_verify_exists():
 # --- Finding 2: PKCE enforced for public clients -------------------------
 def test_public_client_cannot_get_code_without_pkce(auth_client):
     client, _ = auth_client()
-    reg = client.post("/oauth/clients", json={
-        "name": "spa", "confidential": False, "redirect_uris": ["https://spa/cb"]}).json()
+    reg = register_client(client, name="spa", confidential=False, redirect_uris=["https://spa/cb"])
     token = client.post("/oauth/token", data={
         "grant_type": "password", "username": "ada@example.com", "password": "secret"}).json()["access_token"]
 
@@ -100,14 +101,13 @@ def test_exchange_rejects_challengeless_code_without_client_auth():
 
 def test_public_client_full_pkce_flow_still_works(auth_client, s256):
     client, _ = auth_client()
-    reg = client.post("/oauth/clients", json={
-        "name": "spa", "confidential": False, "redirect_uris": ["https://spa/cb"]}).json()
+    reg = register_client(client, name="spa", confidential=False, redirect_uris=["https://spa/cb"])
     token = client.post("/oauth/token", data={
         "grant_type": "password", "username": "ada@example.com", "password": "secret"}).json()["access_token"]
     verifier = "verifier-verifier-verifier-verifier-1234567890"
     code = client.post("/oauth/authorize", json={
         "client_id": reg["id"], "redirect_uri": "https://spa/cb", "scope": "read",
-        "code_challenge": s256(verifier), "code_challenge_method": "S256"},
+        "code_challenge": s256(verifier), "code_challenge_method": "S256", "approved": True},
         headers={"Authorization": f"Bearer {token}"}).json()["code"]
     exchange = client.post("/oauth/token", data={
         "grant_type": "authorization_code", "code": code, "client_id": reg["id"],
@@ -132,7 +132,7 @@ def test_revoke_requires_client_auth(auth_client):
 
 def test_introspect_and_revoke_accept_basic_auth(auth_client):
     client, _ = auth_client()
-    reg = client.post("/oauth/clients", json={"name": "rs", "confidential": True}).json()
+    reg = register_client(client, name="rs", confidential=True)
     basic = base64.b64encode(f"{reg['id']}:{reg['secret']}".encode()).decode()
     headers = {"Authorization": f"Basic {basic}"}
     token = client.post("/oauth/token", data={
@@ -145,14 +145,13 @@ def test_introspect_and_revoke_accept_basic_auth(auth_client):
 # --- Finding 5: redirect_to query params are URL-encoded -----------------
 def test_redirect_to_url_encodes_state(auth_client, s256):
     client, _ = auth_client()
-    reg = client.post("/oauth/clients", json={
-        "name": "spa", "confidential": False, "redirect_uris": ["https://spa/cb"]}).json()
+    reg = register_client(client, name="spa", confidential=False, redirect_uris=["https://spa/cb"])
     token = client.post("/oauth/token", data={
         "grant_type": "password", "username": "ada@example.com", "password": "secret"}).json()["access_token"]
     verifier = "verifier-verifier-verifier-verifier-1234567890"
     resp = client.post("/oauth/authorize", json={
         "client_id": reg["id"], "redirect_uri": "https://spa/cb", "scope": "read",
-        "state": "a b&c=d", "code_challenge": s256(verifier), "code_challenge_method": "S256"},
+        "state": "a b&c=d", "code_challenge": s256(verifier), "code_challenge_method": "S256", "approved": True},
         headers={"Authorization": f"Bearer {token}"}).json()
     # raw special characters must be percent-encoded, not passed through verbatim
     assert "a b&c=d" not in resp["redirect_to"]

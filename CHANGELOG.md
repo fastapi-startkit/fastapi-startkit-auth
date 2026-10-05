@@ -7,25 +7,124 @@ Release notes are also published on
 
 ## [Unreleased]
 
+### Breaking changes and upgrade notes
+
+Each item lists what changed and what to do.
+
+- **Feature providers replace `Application` and `AuthServiceProvider`.**
+  Register `AuthProvider` first, then the features your guards use:
+  `AuthSessionProvider(SessionConfig)`, `AuthOAuth2Provider(OAuth2Config)` and
+  `AuthApiTokenProvider(ApiTokenConfig)`. Standalone apps call
+  `Provider(config).register(app)`; Startkit apps list the providers in the
+  application. *Migrate:* replace `Application([(AuthProvider, Config)])` with a
+  `FastAPI()` app plus the providers, and `AuthServiceProvider` with
+  `AuthProvider` + the feature providers.
+- **Feature settings moved off `AuthConfig`.** The `session`, `api_tokens` and
+  `spa` dicts are rejected at startup; use `SessionConfig`, `ApiTokenConfig`
+  (`stateful_origins` turns on SPA mode) instead. *Migrate:* move each dict's
+  keys onto the matching dataclass and pass it to its provider.
+- **OAuth settings moved to `OAuth2Config`.** `key`, `algorithm`, the `*_ttl`
+  values, `tokens`, `issuer`, `resources`, `scopes`, `pkce_methods` and
+  `require_pkce` now live on `OAuth2Config`. Setting them on `AuthConfig` still
+  works but emits a `DeprecationWarning`, and an explicit `OAuth2Config` value
+  wins. *Migrate:* move them to `OAuth2Config`; the fallback will be removed in a
+  future release.
+- **Password grant is opt-in.** `OAuth2Config.grant_types` defaults to
+  `["authorization_code", "client_credentials", "refresh_token"]`; `/oauth/token`
+  with `grant_type=password` and `/token` answer `unsupported_grant_type`.
+  *Migrate:* add `"password"` to `grant_types` to keep it.
+- **Client-less refresh tokens need the password grant.** Refresh tokens are now
+  bound to the issuing client: refreshing or revoking one requires that client's
+  authentication. Tokens without a client (issued by the password grant) are only
+  accepted while `"password"` is enabled, and client credentials sent alongside
+  one are authenticated (`invalid_client` if wrong). *Migrate:* send client credentials on
+  refresh; keep `"password"` enabled while old client-less tokens are in use.
+- **Consent is mandatory.** `POST /oauth/authorize` returns `access_denied`
+  unless the body has `"approved": true`, and always returns `iss` (body and
+  redirect, RFC 9207). `response_type` other than `code` fails with
+  `unsupported_response_type`. *Migrate:* send `approved: true` after the user
+  consents; `GET /oauth/authorize` validates a request for your consent screen.
+- **PKCE no longer defaults to S256.** A missing `code_challenge_method` means
+  `plain`, which the default `pkce_methods=["S256"]` refuses. RFC 7636 formats are
+  enforced: an S256 challenge is 43 base64url characters, a verifier 43–128
+  unreserved characters. *Migrate:* always send `code_challenge_method=S256` and
+  a verifier of at least 43 characters.
+- **`client_credentials` is for confidential clients only**; public, revoked or
+  grant-disallowed clients get `unauthorized_client` / `invalid_client`.
+  Confidential clients must authenticate on the code exchange. *Migrate:* give
+  machine clients a secret and list the grant (or leave `grant_types` empty).
+- **Introspection requires a confidential client.** *Migrate:* call
+  `/oauth/introspect` with a confidential client's credentials.
+- **`/oauth/clients` HTTP routes are removed.** *Migrate:* create clients with
+  `auth:oauth2:client` (Startkit) or `manager.client_repository.register(...)`.
+- **Password reset routes** move to their own router, mounted by `AuthProvider`
+  whenever `AuthConfig.passwords` is set (no OAuth needed). Paths are unchanged.
+- **Default guard changed** from `"api"` to `"web"` and `AuthConfig.guards`
+  defaults to empty. *Migrate:* set `default` and `guards` explicitly.
+- **CSRF is always on with sessions**, and also accepts the `_token` form field.
+  *Migrate:* send `X-XSRF-TOKEN` (or `_token`) on unsafe requests, or list paths
+  in `SessionConfig.csrf_exempt_paths`.
+- **OAuth client store defaults to `"database"`** (the ORM `oauth_clients`
+  table). *Migrate:* publish and run the migrations, or set
+  `OAuth2Config(clients=OAuthClientsConfig(store="memory"))`.
+- **Persistent stores are named `"database"`.** `store="orm"` still works for
+  sessions, API tokens, OAuth tokens and OAuth clients, but emits a
+  `DeprecationWarning` and will be removed in a future release. *Migrate:*
+  replace `store="orm"` with `store="database"`.
+- **Custom token repositories** must implement `consume_refresh_token` and
+  `revoke_token_chain`, and `store_refresh_token` takes `family_id`.
+- Error responses carry `Cache-Control: no-store`; `invalid_client` challenges
+  with `WWW-Authenticate: Basic`.
+
+### Migrations
+
+All additive; the v0.6.x migrations are unchanged. Publish and run them when
+using the ORM stores:
+
+- `2026_10_04_000001_create_oauth_clients_table` — the `oauth_clients` table.
+- `2026_10_04_000002_add_family_id_to_oauth_refresh_tokens_table` — a nullable,
+  indexed `family_id` column on `oauth_refresh_tokens`.
+
 ### Added
 
-- RFC 8707 resource indicators: `AuthConfig.resources` lists the resources tokens
+- Refresh token families with reuse detection: replaying a rotated refresh token
+  revokes the whole family, whoever presents it: the owning client, another
+  authenticated client, or no client at all for unbound password-grant tokens.
+  Refresh tokens are introspectable.
+- `POST /oauth/revoke` (RFC 7009) revokes the token and its access/refresh chain;
+  `GET`/`DELETE /oauth/tokens` and `DELETE /oauth/tokens/{jti}` let a user list
+  and revoke their OAuth tokens. `DELETE /oauth/personal-access-tokens` revokes
+  all personal access tokens, which also accept a `ttl`.
+- `/.well-known/oauth-authorization-server` metadata (RFC 8414).
+- `OAuth2Config.default_scopes`, `grant_types`, `require_redirect_uri` and
+  `authorization_guard`.
+- `OrmClientRepository` and the `auth:oauth2:client` command (`--public`,
+  `--name`, repeatable `--redirect-uri`).
+- `AuthMiddleware` and request-scoped facades: `Auth.user()`, `Session.token()`,
+  `ApiToken.create(...)` work on the class inside a request. `Auth.validate`
+  checks credentials without logging in.
+- `auth` dependency; token guards fall back to the SPA session cookie.
+- Guest sessions are persisted lazily, only when the response is sent.
+
+### Added (resource indicators, #27)
+
+- RFC 8707 resource indicators: `OAuth2Config.resources` lists the resources tokens
   may be bound to. The token endpoint and `/oauth/authorize` accept `resource`;
   the code and refresh token remember it and the access token carries it as `aud`.
   Unknown or mismatched resources fail with `invalid_target`.
 - Guards accept an `audience`: a passport guard with `"audience": "<uri>"` only
   accepts tokens bound to that resource, and resource-bound tokens are refused by
   guards without it.
-- `AuthConfig.issuer` stamps and verifies the `iss` claim.
-- `AuthConfig.scopes` is a scope catalog: when set, grants refuse unknown scopes
+- `OAuth2Config.issuer` stamps and verifies the `iss` claim.
+- `OAuth2Config.scopes` is a scope catalog: when set, grants refuse unknown scopes
   with `invalid_scope`.
-- `AuthConfig.pkce_methods` restricts `code_challenge_method` (e.g. `["S256"]`),
+- `OAuth2Config.pkce_methods` restricts `code_challenge_method` (e.g. `["S256"]`),
   compared case-insensitively; an unknown `code_challenge_method` is now refused
   at `/oauth/authorize` with `invalid_request`.
-- `AuthConfig.require_pkce` demands a `code_challenge` from confidential clients
+- `OAuth2Config.require_pkce` demands a `code_challenge` from confidential clients
   too (OAuth 2.1 / MCP).
 - A repeated `resource` parameter on the token endpoint fails with `invalid_target`.
-- Building a guard whose `audience` is not listed in `AuthConfig.resources` emits
+- Building a guard whose `audience` is not listed in `OAuth2Config.resources` emits
   a `UserWarning`.
 - `GrantPolicy`, `InvalidScope` and `InvalidTarget` are exported; introspection
   reports `aud` and `iss` when present.

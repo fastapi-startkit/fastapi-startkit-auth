@@ -8,7 +8,7 @@ from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..concurrency import call
-from ..sessions.state import FORGET_KEY, LOADED_ID_KEY, SESSION_KEY
+from ..sessions.state import FORGET_KEY, LOADED_ID_KEY, PENDING_KEY, SESSION_KEY
 from ..sessions.store import SessionStore
 
 
@@ -60,15 +60,23 @@ class SessionMiddleware:
         state[SESSION_KEY] = record
         state[LOADED_ID_KEY] = incoming_id
         state[FORGET_KEY] = False
+        state[PENDING_KEY] = None
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
+                await self._save_pending(state)
                 header = self._cookie_header(state)
                 if header is not None:
                     MutableHeaders(scope=message).append("set-cookie", header)
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
+
+    async def _save_pending(self, state: dict[str, Any]) -> None:
+        pending = state.get(PENDING_KEY)
+        if pending is not None and pending is state.get(SESSION_KEY):
+            await call(self.store.save, pending)
+        state[PENDING_KEY] = None
 
     def _read_cookie(self, scope: Scope) -> str | None:
         raw = next(

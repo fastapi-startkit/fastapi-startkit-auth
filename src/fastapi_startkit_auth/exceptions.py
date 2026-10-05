@@ -102,3 +102,17 @@ class InvalidTarget(AuthError):
 
     error = "invalid_target"
     status_code = 400
+
+
+class UnsupportedResponseType(AuthError):
+    """The authorization endpoint only issues authorization codes."""
+
+    error = "unsupported_response_type"
+    status_code = 400
+
+
+class AccessDenied(AuthError):
+    """The resource owner did not approve the authorization request."""
+
+    error = "access_denied"
+    status_code = 400

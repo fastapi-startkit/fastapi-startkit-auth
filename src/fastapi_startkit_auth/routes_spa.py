@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, Response
 
-from .concurrency import call
 from .dependencies import get_auth_manager
 from .manager import AuthManager
-from .sessions.state import FORGET_KEY, SESSION_KEY
 
 
 def build_spa_router(prefix: str = "") -> APIRouter:
@@ -19,16 +17,7 @@ def build_spa_router(prefix: str = "") -> APIRouter:
         request carries none — so the middleware pair can deliver both the
         HttpOnly session cookie and the JS-readable CSRF cookie on the way out.
         """
-        record = getattr(request.state, SESSION_KEY, None)
-        if record is None:
-            record = await call(
-                manager.session_store.create,
-                user_id=None,
-                guard=manager.session_guard_name(),
-                ttl=manager.session_config.get("ttl"),
-            )
-            setattr(request.state, SESSION_KEY, record)
-            setattr(request.state, FORGET_KEY, False)
+        manager.session_guard().start_guest_session(request)
         # no-store: the response's only payload is Set-Cookie material; caching
         # it would hand a shared cache a session bootstrap.
         return Response(status_code=204, headers={"Cache-Control": "no-store"})

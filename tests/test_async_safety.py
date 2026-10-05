@@ -1,7 +1,5 @@
 import asyncio
-import base64
 import contextlib
-import hashlib
 import warnings
 from types import SimpleNamespace
 
@@ -11,12 +9,10 @@ from fastapi import Body, Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
-    Application,
     AsyncAuth,
     AsyncPassportGuard,
     Auth,
     AuthConfig,
-    AuthProvider,
     SessionGuard,
     current_user,
 )
@@ -31,6 +27,8 @@ from fastapi_startkit_auth.security.jwt import JWTEncoder
 from fastapi_startkit_auth.sessions.store import InMemorySessionStore
 from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
 from fastapi_startkit_auth.tokens.service import TokenService
+
+from conftest import PASSWORD_GRANTS, VERIFIER, oauth2_config, register_auth, s256_challenge
 
 HASHER = BcryptHasher(rounds=4)
 KEY = "async-safety-secret-key-32-bytes-minimum!"
@@ -85,11 +83,8 @@ def accounts():
 ASYNC_PROVIDER = {"driver": "async_model", "model": Account, "is_active": account_is_active}
 
 
-def make_config(connection=None, *, default_guard="api", provider=None, session=None):
-    stores = {"store": "orm", "connection": connection} if connection is not None else {"store": "memory"}
-
+def make_config(*, default_guard="api", provider=None):
     class Config(AuthConfig):
-        key = KEY
         bcrypt_rounds = 4
         default = {"guard": default_guard}
         guards = {
@@ -99,25 +94,33 @@ def make_config(connection=None, *, default_guard="api", provider=None, session=
         }
         providers = {"users": provider or ASYNC_PROVIDER}
 
-    Config.session = session or stores
-    Config.api_tokens = stores
-    Config.tokens = stores
     return Config
 
 
-async def build(connection=None, **kwargs):
-    application = Application([(AuthProvider, make_config(connection, **kwargs))])
+def install(api, connection=None, *, session=None, **kwargs):
+    stores = {"store": "database", "connection": connection} if connection is not None else {"store": "memory"}
+    return register_auth(
+        api,
+        make_config(**kwargs),
+        session=session or stores,
+        oauth2=oauth2_config(key=KEY, grant_types=list(PASSWORD_GRANTS), tokens=stores, clients=stores),
+        api_tokens=stores,
+    )
 
-    @application.api.get("/me")
+
+async def build(connection=None, **kwargs):
+    api = FastAPI()
+    manager = install(api, connection, **kwargs)
+
+    @api.get("/me")
     async def me(user=Depends(current_user)):
         return {"id": user["id"] if isinstance(user, dict) else user.id}
 
-    @application.api.post("/login")
+    @api.post("/login")
     async def login(payload: dict = Body(...), auth: AsyncAuth = Depends(AsyncAuth.scoped)):
         return {"ok": await auth.attempt(payload, guard="web")}
 
-    manager = application.auth
-    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=application.api), base_url="https://testserver")
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="https://testserver")
     return client, manager
 
 
@@ -222,7 +225,7 @@ def test_sync_grant_and_attempt_fail_closed_on_async_validate():
         PasswordGrant(tokens, provider).handle(username="ada@example.com", password="wrong", scopes=[], client_id=None)
 
     guard = SessionGuard(name="web", store=InMemorySessionStore(), provider=provider, ttl=None)
-    manager = SimpleNamespace(guard=lambda name=None: guard)
+    manager = SimpleNamespace(guard=lambda name=None: guard, session_guard=lambda name=None: guard)
     request = SimpleNamespace(state=SimpleNamespace())
     with pytest.raises(AsyncMisconfiguration):
         Auth(manager, request).attempt({"email": "ada@example.com", "password": "wrong"})
@@ -256,15 +259,21 @@ async def test_refresh_denied_for_inactive_owner_does_not_consume_the_token(orm_
 async def test_authorization_code_denied_when_owner_is_gone(orm_database, accounts, how):
     client, manager = await build(orm_database)
     async with client:
-        spa, _ = manager.client_repository.register(
+        spa, _ = await manager.client_repository.register(
             name="spa", redirect_uris=["https://app/cb"], confidential=False, grant_types=["authorization_code"]
         )
-        verifier = "v" * 64
-        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        verifier = VERIFIER
+        challenge = s256_challenge(verifier)
         user_token = (await password_token(client)).json()["access_token"]
         authorized = await client.post(
             "/oauth/authorize",
-            json={"client_id": spa.id, "redirect_uri": "https://app/cb", "code_challenge": challenge},
+            json={
+                "client_id": spa.id,
+                "redirect_uri": "https://app/cb",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "approved": True,
+            },
             headers=bearer(user_token),
         )
         remove_owner(accounts, how)
@@ -282,7 +291,9 @@ async def test_authorization_code_denied_when_owner_is_gone(orm_database, accoun
 async def test_introspect_reports_gone_owner_as_inactive(orm_database, accounts, how):
     client, manager = await build(orm_database)
     async with client:
-        server, secret = manager.client_repository.register(name="rs", grant_types=["client_credentials"])
+        server, secret = await manager.client_repository.register(
+            name="rs", redirect_uris=[], grant_types=["client_credentials"]
+        )
         token = (await password_token(client)).json()["access_token"]
         introspect = {"token": token}
         assert (await client.post("/oauth/introspect", data=introspect, auth=(server.id, secret))).json()["active"]
@@ -295,10 +306,10 @@ async def test_introspect_reports_gone_owner_as_inactive(orm_database, accounts,
 def test_sync_refresh_grant_denied_when_owner_is_gone(how):
     users = [{"id": 1, "email": "ada@example.com", "password": HASHER.make("secret"), "active": True}]
     provider = {"driver": "memory", "users": users, "is_active": "active"}
-    application = Application([(AuthProvider, make_config(provider=provider))])
-    manager = application.auth
+    api = FastAPI()
+    manager = install(api, provider=provider)
     assert isinstance(manager.refresh_grant(), RefreshTokenGrant)
-    client = TestClient(application.api)
+    client = TestClient(api)
     issued = client.post(
         "/oauth/token", data={"grant_type": "password", "username": "ada@example.com", "password": "secret"}
     )
@@ -452,13 +463,13 @@ async def test_async_is_active_treats_a_missing_attribute_as_inactive():
 # --- dummy hash warm-up -----------------------------------------------------
 
 
-def instance_config(provider):
-    return make_config(provider={"driver": "instance", "instance": provider})
+def install_instance(api, provider):
+    return install(api, provider={"driver": "instance", "instance": provider})
 
 
 async def test_manager_warm_up_precomputes_the_dummy_hash_off_the_loop():
     provider = AsyncModelUserProvider(Account, hasher=RecordingHasher(rounds=4))
-    manager = Application([(AuthProvider, instance_config(provider))]).auth
+    manager = install_instance(FastAPI(), provider)
     await manager.warm_up()
     warmed = provider._dummy_hash
     assert warmed is not None
@@ -473,9 +484,10 @@ async def test_manager_warm_up_precomputes_the_dummy_hash_off_the_loop():
 
 def test_app_startup_warms_the_providers():
     provider = AsyncModelUserProvider(Account, hasher=HASHER)
-    application = Application([(AuthProvider, instance_config(provider))])
+    api = FastAPI()
+    install_instance(api, provider)
     assert provider._dummy_hash is None
-    with TestClient(application.api):
+    with TestClient(api):
         assert provider._dummy_hash is not None
 
 
@@ -489,8 +501,9 @@ def test_app_startup_keeps_the_apps_own_lifespan():
         events.append("stop")
 
     provider = AsyncModelUserProvider(Account, hasher=HASHER)
-    application = Application([(AuthProvider, instance_config(provider))], api=FastAPI(lifespan=lifespan))
-    with TestClient(application.api):
+    api = FastAPI(lifespan=lifespan)
+    install_instance(api, provider)
+    with TestClient(api):
         assert provider._dummy_hash is not None
         assert events == ["start"]
     assert events == ["start", "stop"]

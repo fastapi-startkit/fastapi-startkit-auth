@@ -1,25 +1,20 @@
-"""Phase 2 SPA authentication: csrf-cookie endpoint + double-submit middleware.
-
-Runs the axios-shaped flow over HTTPS (Secure cookies) against both session
-stores. The SPA mode is opt-in (``AuthConfig.spa["enabled"]``): the plain
-Phase 1 cookie flow must keep working untouched when it is off.
-"""
-
 import pytest
-from fastapi import Body, Depends
+from fastapi import Body, Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
-    Application,
-    Auth,
+    ApiToken,
+    AsyncAuth,
     AuthConfig,
-    AuthProvider,
     InvalidSession,
     current_user,
 )
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 
+from conftest import register_auth
+
+SPA_ORIGIN = "https://app.example.com"
 SESSION_COOKIE = "startkit_session"
 CSRF_COOKIE = "XSRF-TOKEN"
 CSRF_HEADER = "X-XSRF-TOKEN"
@@ -40,31 +35,31 @@ def seeded_provider(users=USERS):
     return provider
 
 
-def spa_config(spa=None, session=None):
+def spa_config(default_guard="web"):
     provider = seeded_provider()
 
     class Config(AuthConfig):
-        key = "spa-tests-secret-key-32-bytes-minimum!!"
         bcrypt_rounds = 4
-        default = {"guard": "web", "passwords": "users"}
-        guards = {"web": {"driver": "session", "provider": "users"}}
+        default = {"guard": default_guard, "passwords": "users"}
+        guards = {
+            "web": {"driver": "session", "provider": "users"},
+            "api": {"driver": "token", "provider": "users"},
+        }
         providers = {"users": {"driver": "instance", "instance": provider}}
 
-    Config.session = session or {}
-    Config.spa = {"enabled": True, **(spa or {})}
     return Config
 
 
 def wire_routes(api):
     @api.post("/login")
-    def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
-        if not auth.attempt(payload):
+    async def login(payload: dict = Body(...), auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+        if not await auth.attempt(payload):
             raise InvalidSession("Invalid credentials.")
         return {"ok": True}
 
     @api.post("/logout")
-    def logout(auth: Auth = Depends(Auth.scoped)):
-        auth.logout()
+    async def logout(auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+        await auth.logout()
         return {"ok": True}
 
     @api.get("/me")
@@ -83,11 +78,21 @@ def wire_routes(api):
     def github_hook():
         return {"ok": True}
 
+    @api.post("/form")
+    async def form(request: Request):
+        return {"name": (await request.form()).get("name")}
 
-def make_client(spa=None, session=None):
-    application = Application([(AuthProvider, spa_config(spa=spa, session=session))])
-    wire_routes(application.api)
-    return TestClient(application.api, base_url="https://testserver")
+    @api.post("/tokens")
+    async def issue_token(user=Depends(current_user)):
+        return {"token": (await ApiToken.create(user, name="cli")).plain_text}
+
+
+def make_client(session=None, stateful_origins=(SPA_ORIGIN,), default_guard="web"):
+    api = FastAPI()
+    api_tokens = {"stateful_origins": list(stateful_origins or [])}
+    register_auth(api, spa_config(default_guard), session=session or {}, api_tokens=api_tokens)
+    wire_routes(api)
+    return TestClient(api, base_url="https://testserver")
 
 
 @pytest.fixture
@@ -233,7 +238,7 @@ def test_requests_without_a_session_are_exempt(client):
 
 
 def test_exempt_paths_skip_the_token_check():
-    client = make_client(spa={"csrf_exempt_paths": ["/webhook", "/hooks/*"]})
+    client = make_client(session={"csrf_exempt_paths": ["/webhook", "/hooks/*"]})
     client.get("/__auth__/csrf-cookie")
     client.post(
         "/login",
@@ -246,7 +251,7 @@ def test_exempt_paths_skip_the_token_check():
 
 
 def test_configurable_cookie_and_header_names():
-    client = make_client(spa={"csrf_cookie": "MY-CSRF", "csrf_header": "X-MY-CSRF"})
+    client = make_client(session={"csrf_cookie": "MY-CSRF", "csrf_header": "X-MY-CSRF"})
     client.get("/__auth__/csrf-cookie")
     token = client.cookies.get("MY-CSRF")
     assert token
@@ -259,7 +264,7 @@ def test_configurable_cookie_and_header_names():
 
 
 def test_foreign_origin_is_rejected_even_with_a_valid_token():
-    client = make_client(spa={"stateful_origins": ["https://app.example.com"]})
+    client = make_client()
     client.get("/__auth__/csrf-cookie")
     login = {"email": "ada@example.com", "password": "secret"}
 
@@ -285,36 +290,82 @@ def test_foreign_origin_is_rejected_even_with_a_valid_token():
     assert bad_token.status_code == 403
 
 
-def test_origin_check_disabled_when_no_stateful_origins(client):
+def test_requests_without_an_origin_header_rely_on_the_token(client):
     client.get("/__auth__/csrf-cookie")
     response = client.post(
         "/login",
         json={"email": "ada@example.com", "password": "secret"},
-        headers={**csrf_headers(client), "Origin": "https://anywhere.example.com"},
+        headers=csrf_headers(client),
     )
     assert response.status_code == 200
 
 
-# --- opt-in gating ------------------------------------------------------
+# --- Sanctum-style stateful token guard ----------------------------------
 
 
-def test_spa_mode_is_off_by_default():
-    provider = seeded_provider()
+def test_token_guard_accepts_the_spa_session_and_bearer_tokens():
+    client = make_client(default_guard="api")
+    client.get("/__auth__/csrf-cookie")
+    client.post(
+        "/login",
+        json={"email": "ada@example.com", "password": "secret"},
+        headers=csrf_headers(client),
+    )
+    assert client.get("/me").json()["id"] == 1
 
-    class Config(AuthConfig):
-        key = "spa-tests-secret-key-32-bytes-minimum!!"
-        bcrypt_rounds = 4
-        default = {"guard": "web", "passwords": "users"}
-        guards = {"web": {"driver": "session", "provider": "users"}}
-        providers = {"users": {"driver": "instance", "instance": provider}}
-        session = {}
+    token = client.post("/tokens", headers=csrf_headers(client)).json()["token"]
+    mobile = TestClient(client.app, base_url="https://testserver")
+    assert mobile.get("/me", headers={"Authorization": f"Bearer {token}"}).json()["id"] == 1
+    assert mobile.get("/me").status_code == 401
 
-    application = Application([(AuthProvider, Config)])
-    wire_routes(application.api)
-    client = TestClient(application.api, base_url="https://testserver")
+
+def test_token_guard_without_stateful_origins_ignores_the_session():
+    client = make_client(stateful_origins=None, default_guard="api")
+    client.post("/login", json={"email": "ada@example.com", "password": "secret"}, headers={})
+    assert client.cookies.get(SESSION_COOKIE)
+    assert client.get("/me").status_code == 401
+
+
+# --- sessions without SPA mode (Jinja / Inertia) -----------------------------
+
+
+def test_session_only_apps_have_no_csrf_cookie_route_but_enforce_csrf():
+    client = make_client(stateful_origins=None)
 
     assert client.get("/__auth__/csrf-cookie").status_code == 404
-    # Phase 1 behavior untouched: session-cookie requests need no CSRF header.
     client.post("/login", json={"email": "ada@example.com", "password": "secret"})
-    assert client.post("/mutate").status_code == 200
-    assert client.post("/logout").status_code == 200
+    assert client.cookies.get(CSRF_COOKIE)
+    assert client.post("/mutate").status_code == 403
+    assert client.post("/mutate", headers=csrf_headers(client)).status_code == 200
+
+
+def test_form_posts_may_send_the_token_as_a_field(client):
+    client.post("/login", json={"email": "ada@example.com", "password": "secret"})
+    token = client.cookies.get(CSRF_COOKIE)
+
+    assert client.post("/form", data={"name": "ada"}).status_code == 403
+    assert client.post("/form", data={"name": "ada", "_token": "wrong"}).status_code == 403
+    accepted = client.post("/form", data={"name": "ada", "_token": token})
+    assert accepted.status_code == 200
+    assert accepted.json() == {"name": "ada"}
+
+
+def test_multipart_posts_may_send_the_token_as_a_field(client):
+    client.post("/login", json={"email": "ada@example.com", "password": "secret"})
+    token = client.cookies.get(CSRF_COOKIE)
+
+    response = client.post("/form", data={"name": "grace", "_token": token}, files={"upload": ("a.txt", b"hi")})
+    assert response.status_code == 200
+    assert response.json() == {"name": "grace"}
+
+
+def test_spa_mode_requires_the_session_provider():
+    from fastapi_startkit_auth import FeatureNotRegistered
+
+    class Config(AuthConfig):
+        guards = {"api": {"driver": "token", "provider": "users"}}
+        default = {"guard": "api", "passwords": "users"}
+        providers = {"users": {"driver": "instance", "instance": seeded_provider()}}
+
+    with pytest.raises(FeatureNotRegistered, match="AuthSessionProvider"):
+        register_auth(FastAPI(), Config, api_tokens={"stateful_origins": [SPA_ORIGIN]})

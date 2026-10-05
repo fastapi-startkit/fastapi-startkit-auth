@@ -90,6 +90,7 @@ class OrmTokenRepository:
         scopes: list[str],
         expires_at: float | None,
         resource: str | None = None,
+        family_id: str | None = None,
     ) -> RefreshTokenRecord:
         record = RefreshTokenRecord(
             token_id=token_id,
@@ -99,6 +100,8 @@ class OrmTokenRepository:
             scopes=list(scopes),
             expires_at=expires_at,
             resource=resource,
+            # A new family is named after its first token, so only its digest may be stored.
+            family_id=_digest(token_id) if family_id is None else family_id,
         )
         await self._refresh().insert(
             {
@@ -111,26 +114,14 @@ class OrmTokenRepository:
                 "revoked": record.revoked,
                 "created_at": record.created_at,
                 "resource": record.resource,
+                "family_id": record.family_id,
             }
         )
         return record
 
     async def find_refresh_token(self, token_id: str) -> RefreshTokenRecord | None:
         row = await self._refresh().where("token_hash", _digest(token_id)).first()
-        if row is None:
-            return None
-        data = orm.attributes(row)
-        return RefreshTokenRecord(
-            token_id=token_id,
-            access_jti=data["access_jti"],
-            user_id=json.loads(data["user_id"]),
-            client_id=data["client_id"],
-            scopes=json.loads(data["scopes"]),
-            expires_at=data["expires_at"],
-            revoked=bool(data["revoked"]),
-            created_at=data["created_at"],
-            resource=data.get("resource"),
-        )
+        return None if row is None else _refresh_record(token_id, orm.attributes(row))
 
     async def revoke_refresh_token(self, token_id: str) -> bool:
         # The conditional UPDATE is the atomic step: only the caller that flips revoked wins a rotation race.
@@ -141,6 +132,37 @@ class OrmTokenRepository:
             .update({"revoked": True})
         )
         return updated > 0
+
+    async def consume_refresh_token(self, token_id: str) -> RefreshTokenRecord | None:
+        """Atomically rotate out a refresh token; replaying a used one revokes its family."""
+        record = await self.find_refresh_token(token_id)
+        if record is None or record.expired:
+            return None
+        if record.revoked or not await self.revoke_refresh_token(token_id):
+            await self._revoke_families([record.family_id])
+            return None
+        record.revoked = True
+        return record
+
+    async def revoke_token_chain(self, jti: str) -> bool:
+        """Revoke an access token plus every refresh token (and its access token) in the same family."""
+        revoked = await self.revoke_access_token(jti)
+        rows = await self._refresh().where("access_jti", jti).get()
+        families = [orm.attributes(row)["family_id"] for row in rows]
+        await self._revoke_families(families)
+        return revoked or bool(families)
+
+    async def _revoke_families(self, families: list[str | None]) -> None:
+        # Rows written before the family_id migration keep a NULL family_id, so a
+        # replay reaches only the tokens rotated from them after the upgrade.
+        families = [family for family in families if family]
+        if not families:
+            return
+        rows = await self._refresh().where_in("family_id", families).get()
+        jtis = [orm.attributes(row)["access_jti"] for row in rows]
+        await self._refresh().where_in("family_id", families).update({"revoked": True})
+        if jtis:
+            await self._access().where_in("jti", jtis).update({"revoked": True})
 
     async def store_auth_code(
         self,
@@ -204,9 +226,30 @@ class OrmTokenRepository:
 
     async def purge_expired(self) -> None:
         now = time.time()
-        await self._access().where("expires_at", "<", now).delete()
         await self._refresh().where("expires_at", "<", now).delete()
+        # A live refresh token still needs its access record so a chain revocation can find it.
+        rows = await self._refresh().where("revoked", False).get()
+        linked = [orm.attributes(row)["access_jti"] for row in rows]
+        expired = self._access().where("expires_at", "<", now)
+        if linked:
+            expired = expired.where_not_in("jti", linked)
+        await expired.delete()
         await self._codes().where("expires_at", "<", now).delete()
+
+
+def _refresh_record(token_id: str, data: dict[str, Any]) -> RefreshTokenRecord:
+    return RefreshTokenRecord(
+        token_id=token_id,
+        access_jti=data["access_jti"],
+        user_id=json.loads(data["user_id"]),
+        client_id=data["client_id"],
+        scopes=json.loads(data["scopes"]),
+        expires_at=data["expires_at"],
+        revoked=bool(data["revoked"]),
+        created_at=data["created_at"],
+        resource=data.get("resource"),
+        family_id=data.get("family_id") or _digest(token_id),
+    )
 
 
 def _access_record(row: dict[str, Any]) -> AccessTokenRecord:
