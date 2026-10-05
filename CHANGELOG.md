@@ -67,6 +67,11 @@ Each item lists what changed and what to do.
 - **OAuth client store defaults to `"database"`** (the ORM `oauth_clients`
   table). *Migrate:* publish and run the migrations, or set
   `OAuth2Config(clients=OAuthClientsConfig(store="memory"))`.
+- **The in-memory OAuth client store is async.** `InMemoryClientRepository`
+  methods (`register`, `find`, `all`, `authenticate`, `revoke`, `delete`) are
+  coroutines, like `OrmClientRepository`, and `store="memory"` now makes the
+  manager build the async refresh and authorization-code grants. *Migrate:*
+  `await` client-store calls and the `handle` / `issue_code` of those grants.
 - **Persistent stores are named `"database"`.** `store="orm"` still works for
   sessions, API tokens, OAuth tokens and OAuth clients, but emits a
   `DeprecationWarning` and will be removed in a future release. *Migrate:*

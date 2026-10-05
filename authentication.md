@@ -488,7 +488,7 @@ the plaintext secret, which is `None` for a public client:
 ```python
 manager = app.state.auth_manager  # or container.make("auth_manager") under Startkit
 
-client, secret = manager.client_repository.register(
+client, secret = await manager.client_repository.register(
     name="reporting",
     redirect_uris=[],
     confidential=True,
@@ -499,8 +499,10 @@ client, secret = manager.client_repository.register(
 ```
 
 With the default `OAuthClientsConfig(store="database")`, clients live in the
-`oauth_clients` table through `OrmClientRepository`. Its methods are coroutines,
-so `await` them. `InMemoryClientRepository` (`store="memory"`) is synchronous.
+`oauth_clients` table through `OrmClientRepository`; `store="memory"` uses
+`InMemoryClientRepository`. Both are async, so `await` their methods. An async
+client store makes the manager build the async refresh and authorization-code
+grants.
 
 ### Authorization code with PKCE
 

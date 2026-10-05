@@ -190,7 +190,7 @@ introspection re-check the token owner against it. A client without a
 client bound to a different provider with `unauthorized_client`:
 
 ```python
-client, secret = manager.client_repository.register(name="admin-panel", provider="admins")
+client, secret = await manager.client_repository.register(name="admin-panel", provider="admins")
 ```
 
 ### ORM stores and migrations

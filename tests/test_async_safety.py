@@ -28,7 +28,7 @@ from fastapi_startkit_auth.sessions.store import InMemorySessionStore
 from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
 from fastapi_startkit_auth.tokens.service import TokenService
 
-from conftest import PASSWORD_GRANTS, VERIFIER, oauth2_config, register_auth, s256_challenge
+from conftest import PASSWORD_GRANTS, VERIFIER, SyncClientRepository, oauth2_config, register_auth, s256_challenge
 
 HASHER = BcryptHasher(rounds=4)
 KEY = "async-safety-secret-key-32-bytes-minimum!"
@@ -97,13 +97,13 @@ def make_config(*, default_guard="api", provider=None):
     return Config
 
 
-def install(api, connection=None, *, session=None, **kwargs):
+def install(api, connection=None, *, session=None, clients=None, **kwargs):
     stores = {"store": "database", "connection": connection} if connection is not None else {"store": "memory"}
     return register_auth(
         api,
         make_config(**kwargs),
         session=session or stores,
-        oauth2=oauth2_config(key=KEY, grant_types=list(PASSWORD_GRANTS), tokens=stores, clients=stores),
+        oauth2=oauth2_config(key=KEY, grant_types=list(PASSWORD_GRANTS), tokens=stores, clients=clients or stores),
         api_tokens=stores,
     )
 
@@ -307,7 +307,8 @@ def test_sync_refresh_grant_denied_when_owner_is_gone(how):
     users = [{"id": 1, "email": "ada@example.com", "password": HASHER.make("secret"), "active": True}]
     provider = {"driver": "memory", "users": users, "is_active": "active"}
     api = FastAPI()
-    manager = install(api, provider=provider)
+    sync_clients = {"store": "instance", "instance": SyncClientRepository()}
+    manager = install(api, provider=provider, clients=sync_clients)
     assert isinstance(manager.refresh_grant(), RefreshTokenGrant)
     client = TestClient(api)
     issued = client.post(

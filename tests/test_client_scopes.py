@@ -63,15 +63,15 @@ def test_star_is_not_a_wildcard_in_the_allow_list():
 # --- repositories -------------------------------------------------------------
 
 
-def test_in_memory_repository_stores_scopes_and_revokes():
+async def test_in_memory_repository_stores_scopes_and_revokes():
     repo = InMemoryClientRepository(hasher=BcryptHasher(rounds=4))
-    client, secret = repo.register(name="svc", scopes=["read"])
-    assert repo.find(client.id).scopes == ["read"]
-    assert repo.authenticate(client.id, secret) is client
+    client, secret = await repo.register(name="svc", scopes=["read"])
+    assert (await repo.find(client.id)).scopes == ["read"]
+    assert await repo.authenticate(client.id, secret) is client
 
-    assert repo.revoke(client.id) is True
-    assert repo.authenticate(client.id, secret) is None
-    assert repo.revoke("missing") is False
+    assert await repo.revoke(client.id) is True
+    assert await repo.authenticate(client.id, secret) is None
+    assert await repo.revoke("missing") is False
 
 
 async def test_orm_repository_round_trips_scopes(orm_database):
@@ -225,11 +225,11 @@ async def test_async_password_grant_checks_client_scopes_before_credentials():
 # --- scopes must be a list ----------------------------------------------------
 
 
-def test_string_scopes_are_rejected():
+async def test_string_scopes_are_rejected():
     with pytest.raises(TypeError):
         Client(id="c", name="c", scopes="read")
     with pytest.raises(TypeError):
-        InMemoryClientRepository(hasher=BcryptHasher(rounds=4)).register(name="svc", scopes="read")
+        await InMemoryClientRepository(hasher=BcryptHasher(rounds=4)).register(name="svc", scopes="read")
 
 
 async def test_orm_register_rejects_string_scopes(orm_database):
