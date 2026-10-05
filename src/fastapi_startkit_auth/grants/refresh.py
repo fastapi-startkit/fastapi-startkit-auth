@@ -30,7 +30,7 @@ def ensure_owner_active(provider: Any, user_id: Any) -> None:
 
 
 def ensure_issued_to(record: Any, client_id: str | None) -> None:
-    if record is not None and record.client_id != client_id:
+    if record.client_id != client_id:
         raise InvalidGrant("The refresh token was not issued to this client.")
 
 
@@ -60,8 +60,9 @@ class RefreshTokenGrant:
         client_id: str | None = None,
     ) -> IssuedToken:
         record = ensure_sync(self._tokens.repository.find_refresh_token(refresh_token), "find_refresh_token")
-        ensure_issued_to(record, client_id)
+        # A used token must reach TokenService.refresh, whose reuse detection revokes its family whoever presents it.
         if record is not None and record.active:
+            ensure_issued_to(record, client_id)
             ensure_owner_active(self._owner_provider(record.client_id), record.user_id)
         return self._tokens.refresh(refresh_token, scopes=scopes, resource=resource, client_id=client_id)
 
@@ -85,7 +86,7 @@ class AsyncRefreshTokenGrant:
         client_id: str | None = None,
     ) -> IssuedToken:
         record = await call(self._tokens.repository.find_refresh_token, refresh_token)
-        ensure_issued_to(record, client_id)
         if record is not None and record.active:
+            ensure_issued_to(record, client_id)
             await ensure_owner_active_async(await call(self._owner_provider, record.client_id), record.user_id)
         return await call(self._tokens.refresh, refresh_token, scopes=scopes, resource=resource, client_id=client_id)
