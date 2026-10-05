@@ -8,8 +8,8 @@ from ..exceptions import InvalidSession
 from ..concurrency import call, ensure_sync
 from ..providers.base import UserProvider, user_is_active, user_is_active_async
 from ..sessions.models import SessionRecord
-from ..sessions.state import FORGET_KEY, SESSION_KEY
-from ..sessions.store import SessionStore
+from ..sessions.state import FORGET_KEY, PENDING_KEY, SESSION_KEY
+from ..sessions.store import SessionStore, new_session_record
 from .guard import AuthContext
 
 
@@ -51,14 +51,8 @@ class SessionGuard:
         sends the new id in the cookie.
         """
         previous = getattr(request.state, SESSION_KEY, None)
-        record = ensure_sync(
-            self.store.create(
-                user_id=self.provider.get_identifier(user),
-                guard=self.name,
-                ttl=self.ttl,
-            ),
-            "The session store's create",
-        )
+        record = new_session_record(user_id=self.provider.get_identifier(user), guard=self.name, ttl=self.ttl)
+        ensure_sync(self.store.save(record), "The session store's save")
         if previous is not None:
             ensure_sync(self.store.invalidate(previous.id), "The session store's invalidate")
         setattr(request.state, SESSION_KEY, record)
@@ -71,7 +65,11 @@ class SessionGuard:
         if record is not None:
             ensure_sync(self.store.invalidate(record.id), "The session store's invalidate")
         setattr(request.state, SESSION_KEY, None)
+        setattr(request.state, PENDING_KEY, None)
         setattr(request.state, FORGET_KEY, True)
+
+    def start_guest_session(self, request: Request) -> SessionRecord:
+        return start_guest_session(request, self.name, self.ttl)
 
     def _context(self, record: SessionRecord) -> AuthContext:
         if record.user_id is None:
@@ -106,9 +104,8 @@ class AsyncSessionGuard:
 
     async def login(self, request: Request, user: Any) -> SessionRecord:
         previous = getattr(request.state, SESSION_KEY, None)
-        record = await call(
-            self.store.create, user_id=self.provider.get_identifier(user), guard=self.name, ttl=self.ttl
-        )
+        record = new_session_record(user_id=self.provider.get_identifier(user), guard=self.name, ttl=self.ttl)
+        await call(self.store.save, record)
         if previous is not None:
             await call(self.store.invalidate, previous.id)
         setattr(request.state, SESSION_KEY, record)
@@ -120,7 +117,11 @@ class AsyncSessionGuard:
         if record is not None:
             await call(self.store.invalidate, record.id)
         setattr(request.state, SESSION_KEY, None)
+        setattr(request.state, PENDING_KEY, None)
         setattr(request.state, FORGET_KEY, True)
+
+    def start_guest_session(self, request: Request) -> SessionRecord:
+        return start_guest_session(request, self.name, self.ttl)
 
     async def _context(self, record: SessionRecord) -> AuthContext:
         if record.user_id is None:
@@ -130,3 +131,19 @@ class AsyncSessionGuard:
             await call(self.store.invalidate, record.id)
             raise InvalidSession("The session user no longer exists.")
         return AuthContext(user=user, scopes=["*"])
+
+
+def start_guest_session(request: Request, guard: str, ttl: float | None) -> SessionRecord:
+    """Return the request's session, starting a user-less one if it has none.
+
+    The new record is only persisted when the response starts (see
+    ``SessionMiddleware``), so it can still be re-keyed or dropped for free.
+    """
+    record = getattr(request.state, SESSION_KEY, None)
+    if record is not None:
+        return record
+    record = new_session_record(user_id=None, guard=guard, ttl=ttl)
+    setattr(request.state, SESSION_KEY, record)
+    setattr(request.state, PENDING_KEY, record)
+    setattr(request.state, FORGET_KEY, False)
+    return record

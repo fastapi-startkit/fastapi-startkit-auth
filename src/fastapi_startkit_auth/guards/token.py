@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import Request
 
 from ..apitokens.manager import ApiTokenManager
-from ..exceptions import InvalidToken
+from ..exceptions import InvalidSession, InvalidToken
 from ..concurrency import call, ensure_sync
 from ..providers.base import UserProvider, user_is_active, user_is_active_async
 from .guard import AuthContext
@@ -27,14 +28,21 @@ class TokenGuard:
         tokens: ApiTokenManager,
         provider: UserProvider,
         header: str = "Authorization",
+        session_guard: Callable[[], Any] | None = None,
     ) -> None:
         self.name = name
         self._tokens = tokens
         self.provider = provider
         self.header = header
+        self._session_guard = session_guard
 
     def authenticate(self, request: Request) -> AuthContext:
-        """Resolve the request's configured token header to an ``AuthContext``."""
+        """Resolve the SPA session (stateful mode) or the configured token header."""
+        if self._session_guard is not None:
+            try:
+                return self._session_guard().authenticate(request)
+            except InvalidSession:
+                pass
         token = self._extract(request)
         if not token:
             raise InvalidToken("Not authenticated.")
@@ -49,7 +57,7 @@ class TokenGuard:
             raise InvalidToken("The API token is invalid.")
         if not user_is_active(self.provider, user):
             raise InvalidToken("The API token is invalid.")
-        return AuthContext(user=user, scopes=list(record.abilities))
+        return AuthContext(user=user, scopes=list(record.abilities), jti=record.id)
 
     def _extract(self, request: Request) -> str | None:
         return _extract_token(request, self.header)
@@ -68,13 +76,26 @@ def _extract_token(request: Request, header: str) -> str | None:
 
 
 class AsyncTokenGuard:
-    def __init__(self, name: str, tokens: Any, provider: Any, header: str = "Authorization") -> None:
+    def __init__(
+        self,
+        name: str,
+        tokens: Any,
+        provider: Any,
+        header: str = "Authorization",
+        session_guard: Callable[[], Any] | None = None,
+    ) -> None:
         self.name = name
         self._tokens = tokens
         self.provider = provider
         self.header = header
+        self._session_guard = session_guard
 
     async def authenticate(self, request: Request) -> AuthContext:
+        if self._session_guard is not None:
+            try:
+                return await call(self._session_guard().authenticate, request)
+            except InvalidSession:
+                pass
         token = _extract_token(request, self.header)
         if not token:
             raise InvalidToken("Not authenticated.")
@@ -88,4 +109,4 @@ class AsyncTokenGuard:
             raise InvalidToken("The API token is invalid.")
         if not await user_is_active_async(self.provider, user):
             raise InvalidToken("The API token is invalid.")
-        return AuthContext(user=user, scopes=list(record.abilities))
+        return AuthContext(user=user, scopes=list(record.abilities), jti=record.id)

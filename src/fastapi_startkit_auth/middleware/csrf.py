@@ -5,6 +5,7 @@ from http.cookies import SimpleCookie
 from typing import Any, Iterable
 
 from starlette.datastructures import MutableHeaders
+from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -12,6 +13,7 @@ from ..exceptions import CsrfTokenMismatch
 from ..sessions.state import FORGET_KEY, SESSION_KEY
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
 
 
 class CsrfMiddleware:
@@ -22,7 +24,7 @@ class CsrfMiddleware:
 
     Request phase — unsafe methods (POST/PUT/PATCH/DELETE) on requests that
     carry a live session must present the configured header (default
-    ``X-XSRF-TOKEN``) matching the session's ``csrf_token``; the comparison is
+    ``X-XSRF-TOKEN``), or for HTML form posts the ``field`` (default ``_token``), matching the session's ``csrf_token``; the comparison is
     constant-time and failure is a 403 ``csrf_token_mismatch``. Requests
     without a session (bearer/token clients — no ambient credential) and safe
     methods are exempt, as are configured exempt paths. When
@@ -42,6 +44,7 @@ class CsrfMiddleware:
         app: ASGIApp,
         cookie: str = "XSRF-TOKEN",
         header: str = "X-XSRF-TOKEN",
+        field: str = "_token",
         exempt_paths: Iterable[str] = (),
         stateful_origins: Iterable[str] = (),
         ttl: float | None = 7200,
@@ -53,6 +56,7 @@ class CsrfMiddleware:
         self.app = app
         self.cookie = cookie
         self.header = header.lower().encode("latin-1")
+        self.field = field
         self.exempt_paths = tuple(exempt_paths)
         self.stateful_origins = frozenset(stateful_origins)
         self.ttl = ttl
@@ -69,7 +73,7 @@ class CsrfMiddleware:
         state = scope.setdefault("state", {})
         record = state.get(SESSION_KEY)
         if scope["method"] in UNSAFE_METHODS and record is not None:
-            rejection = self._reject(scope, record)
+            receive, rejection = await self._reject(scope, receive, record)
             if rejection is not None:
                 await rejection(scope, receive, send)
                 return
@@ -85,18 +89,46 @@ class CsrfMiddleware:
 
         await self.app(scope, receive, send_wrapper)
 
-    def _reject(self, scope: Scope, record: Any) -> Response | None:
+    async def _reject(self, scope: Scope, receive: Receive, record: Any) -> tuple[Receive, Response | None]:
         origin = self._header_value(scope, b"origin")
         if self.stateful_origins and origin is not None and origin not in self.stateful_origins:
-            return self._forbidden("Origin is not in the configured stateful origins.")
+            return receive, self._forbidden("Origin is not in the configured stateful origins.")
         if self._exempt(scope["path"]):
-            return None
+            return receive, None
         supplied = self._header_value(scope, self.header)
+        if supplied is None and self._is_form(scope):
+            receive, supplied = await self._read_form_token(scope, receive)
         if supplied is None or not secrets.compare_digest(
             supplied.encode("latin-1"), record.csrf_token.encode("latin-1")
         ):
-            return self._forbidden("CSRF token missing or invalid.")
-        return None
+            return receive, self._forbidden("CSRF token missing or invalid.")
+        return receive, None
+
+    def _is_form(self, scope: Scope) -> bool:
+        content_type = self._header_value(scope, b"content-type") or ""
+        return content_type.startswith(FORM_CONTENT_TYPES)
+
+    async def _read_form_token(self, scope: Scope, receive: Receive) -> tuple[Receive, str | None]:
+        # The body is consumed here, so it is buffered and replayed for the app.
+        messages: list[Message] = []
+        more_body = True
+        while more_body:
+            message = await receive()
+            messages.append(message)
+            more_body = message.get("type") == "http.request" and message.get("more_body", False)
+
+        def replay() -> Receive:
+            pending = list(messages)
+
+            async def replayed() -> Message:
+                return pending.pop(0) if pending else await receive()
+
+            return replayed
+
+        form = await Request(scope, replay()).form()
+        value = form.get(self.field)
+        await form.close()
+        return replay(), value if isinstance(value, str) else None
 
     @staticmethod
     def _forbidden(description: str) -> Response:

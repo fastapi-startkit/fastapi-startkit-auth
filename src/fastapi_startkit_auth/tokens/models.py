@@ -43,6 +43,13 @@ class RefreshTokenRecord:
     revoked: bool = False
     created_at: float = field(default_factory=lambda: time.time())
     resource: str | None = None
+    # Every token rotated from the same grant shares a family, so replaying a
+    # rotated-out token can revoke the whole chain.
+    family_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.family_id is None:
+            self.family_id = self.token_id
 
     @property
     def expired(self) -> bool:

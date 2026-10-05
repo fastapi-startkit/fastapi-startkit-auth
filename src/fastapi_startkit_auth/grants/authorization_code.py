@@ -6,26 +6,28 @@ from typing import Any
 
 from ..clients.models import Client
 from ..concurrency import call
-from ..exceptions import InvalidGrant
-from ..policy import GrantPolicy, ensure_same_resource
+from ..exceptions import InvalidClient, InvalidGrant
+from ..policy import GrantPolicy, ensure_client_may, ensure_same_resource, ensure_valid_verifier
 from ..tokens.service import IssuedToken, TokenService
 from ..tokens.models import AuthorizationCode
 from .pkce import verify_pkce
 from .refresh import OwnerProviderResolver, ensure_owner_active, ensure_owner_active_async, owner_resolver
 
 
-def _new_code(
+def _validate_request(
     policy: GrantPolicy,
     client: Client,
+    redirect_uri: str | None,
     scopes: list[str],
     code_challenge: str | None,
     code_challenge_method: str | None,
     resource: str | None,
-) -> str:
+) -> None:
+    ensure_client_may(client, "authorization_code")
+    policy.check_redirect(client, redirect_uri)
     policy.check_pkce(client.confidential, code_challenge, code_challenge_method)
     policy.check_scopes(scopes)
     policy.check_resource(resource)
-    return secrets.token_urlsafe(40)
 
 
 def _validate_exchange(
@@ -36,6 +38,9 @@ def _validate_exchange(
     client_authenticated: bool,
     resource: str | None,
 ) -> None:
+    ensure_client_may(client, "authorization_code")
+    if client.confidential and not client_authenticated:
+        raise InvalidClient("Confidential clients must authenticate to exchange a code.")
     if record is None or record.expired:
         raise InvalidGrant("The authorization code is invalid or expired.")
     if record.client_id != client.id:
@@ -46,7 +51,8 @@ def _validate_exchange(
     if not client_authenticated and not record.code_challenge:
         raise InvalidGrant("PKCE is required: this code was not bound to a code_challenge.")
     if record.code_challenge:
-        if not verify_pkce(code_verifier or "", record.code_challenge, record.code_challenge_method):
+        ensure_valid_verifier(code_verifier)
+        if not verify_pkce(code_verifier, record.code_challenge, record.code_challenge_method):
             raise InvalidGrant("PKCE verification failed.")
     ensure_same_resource(record.resource, resource)
 
@@ -77,6 +83,21 @@ class AuthorizationCodeGrant:
         self._policy = policy or GrantPolicy()
         self._owner_provider = owner_resolver(user_provider, owner_provider)
 
+    def validate_request(
+        self,
+        *,
+        client: Client,
+        redirect_uri: str | None,
+        scopes: list[str],
+        code_challenge: str | None,
+        code_challenge_method: str | None,
+        resource: str | None = None,
+    ) -> None:
+        """Reject an authorization request before the user is asked to approve it."""
+        _validate_request(
+            self._policy, client, redirect_uri, scopes, code_challenge, code_challenge_method, resource
+        )
+
     def issue_code(
         self,
         *,
@@ -88,7 +109,10 @@ class AuthorizationCodeGrant:
         code_challenge_method: str | None,
         resource: str | None = None,
     ) -> str:
-        code = _new_code(self._policy, client, scopes, code_challenge, code_challenge_method, resource)
+        _validate_request(
+            self._policy, client, redirect_uri, scopes, code_challenge, code_challenge_method, resource
+        )
+        code = secrets.token_urlsafe(40)
         self._tokens.repository.store_auth_code(
             code=code,
             client_id=client.id,
@@ -138,6 +162,21 @@ class AsyncAuthorizationCodeGrant:
         self._policy = policy or GrantPolicy()
         self._owner_provider = owner_resolver(user_provider, owner_provider)
 
+    def validate_request(
+        self,
+        *,
+        client: Client,
+        redirect_uri: str | None,
+        scopes: list[str],
+        code_challenge: str | None,
+        code_challenge_method: str | None,
+        resource: str | None = None,
+    ) -> None:
+        """Reject an authorization request before the user is asked to approve it."""
+        _validate_request(
+            self._policy, client, redirect_uri, scopes, code_challenge, code_challenge_method, resource
+        )
+
     async def issue_code(
         self,
         *,
@@ -149,7 +188,10 @@ class AsyncAuthorizationCodeGrant:
         code_challenge_method: str | None,
         resource: str | None = None,
     ) -> str:
-        code = _new_code(self._policy, client, scopes, code_challenge, code_challenge_method, resource)
+        _validate_request(
+            self._policy, client, redirect_uri, scopes, code_challenge, code_challenge_method, resource
+        )
+        code = secrets.token_urlsafe(40)
         await call(
             self._tokens.repository.store_auth_code,
             code=code,
@@ -176,7 +218,7 @@ class AsyncAuthorizationCodeGrant:
     ) -> IssuedToken:
         record = await call(self._tokens.repository.pull_auth_code, code)
         _validate_exchange(record, client, redirect_uri, code_verifier, client_authenticated, resource)
-        await ensure_owner_active_async(self._owner_provider(client.id), record.user_id)
+        await ensure_owner_active_async(await call(self._owner_provider, client.id), record.user_id)
         return await call(
             self._tokens.issue,
             user_id=record.user_id,

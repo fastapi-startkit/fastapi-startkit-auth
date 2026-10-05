@@ -6,7 +6,7 @@ from typing import Any
 
 from .. import orm
 from .models import SessionRecord
-from .store import generate_csrf_token, generate_session_id
+from .store import generate_session_id, new_session_record
 
 
 class OrmSessionStore:
@@ -34,17 +34,12 @@ class OrmSessionStore:
         await self.purge_expired()
 
     async def create(self, *, user_id: Any, guard: str, ttl: float | None) -> SessionRecord:
+        record = new_session_record(user_id=user_id, guard=guard, ttl=ttl)
+        await self.save(record)
+        return record
+
+    async def save(self, record: SessionRecord) -> None:
         await self._maybe_purge()
-        now = time.time()
-        record = SessionRecord(
-            id=generate_session_id(),
-            user_id=user_id,
-            guard=guard,
-            csrf_token=generate_csrf_token(),
-            created_at=now,
-            last_activity=now,
-            expires_at=(now + ttl) if ttl is not None else None,
-        )
         await self._query().insert(
             {
                 "id": record.id,
@@ -56,7 +51,6 @@ class OrmSessionStore:
                 "expires_at": record.expires_at,
             }
         )
-        return record
 
     async def find(self, session_id: str) -> SessionRecord | None:
         row = await self._query().where("id", session_id).first()

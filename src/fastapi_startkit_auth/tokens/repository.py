@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -18,6 +19,7 @@ class InMemoryTokenRepository:
         self._access: dict[str, AccessTokenRecord] = {}
         self._refresh: dict[str, RefreshTokenRecord] = {}
         self._codes: dict[str, AuthorizationCode] = {}
+        self.refresh_lock = threading.RLock()
 
     # --- access tokens -------------------------------------------------
     def store_access_token(
@@ -70,6 +72,7 @@ class InMemoryTokenRepository:
         scopes: list[str],
         expires_at: float | None,
         resource: str | None = None,
+        family_id: str | None = None,
     ) -> RefreshTokenRecord:
         rec = RefreshTokenRecord(
             token_id=token_id,
@@ -79,19 +82,48 @@ class InMemoryTokenRepository:
             scopes=list(scopes),
             expires_at=expires_at,
             resource=resource,
+            family_id=family_id,
         )
-        self._refresh[token_id] = rec
+        with self.refresh_lock:
+            self._refresh[token_id] = rec
         return rec
 
     def find_refresh_token(self, token_id: str) -> RefreshTokenRecord | None:
         return self._refresh.get(token_id)
 
     def revoke_refresh_token(self, token_id: str) -> bool:
-        rec = self._refresh.get(token_id)
-        if rec is None:
-            return False
-        rec.revoked = True
-        return True
+        with self.refresh_lock:
+            rec = self._refresh.get(token_id)
+            if rec is None or rec.revoked:
+                return False
+            rec.revoked = True
+            return True
+
+    def consume_refresh_token(self, token_id: str) -> RefreshTokenRecord | None:
+        """Atomically rotate out a refresh token; replaying a used one revokes its family."""
+        with self.refresh_lock:
+            record = self._refresh.get(token_id)
+            if record is None or record.expired:
+                return None
+            if record.revoked:
+                self._revoke_families({record.family_id})
+                return None
+            record.revoked = True
+            return record
+
+    def revoke_token_chain(self, jti: str) -> bool:
+        """Revoke an access token plus every refresh token (and its access token) in the same family."""
+        with self.refresh_lock:
+            revoked = self.revoke_access_token(jti)
+            families = {record.family_id for record in self._refresh.values() if record.access_jti == jti}
+            self._revoke_families(families)
+            return revoked or bool(families)
+
+    def _revoke_families(self, families: set[str | None]) -> None:
+        for record in self._refresh.values():
+            if record.family_id in families:
+                record.revoked = True
+                self.revoke_access_token(record.access_jti)
 
     # --- authorization codes ------------------------------------------
     def store_auth_code(
@@ -128,6 +160,9 @@ class InMemoryTokenRepository:
     # --- maintenance ---------------------------------------------------
     def purge_expired(self) -> None:
         now = time.time()
-        self._access = {k: v for k, v in self._access.items() if not (v.expires_at and v.expires_at < now)}
-        self._refresh = {k: v for k, v in self._refresh.items() if not (v.expires_at and v.expires_at < now)}
+        with self.refresh_lock:
+            self._refresh = {k: v for k, v in self._refresh.items() if not (v.expires_at and v.expires_at < now)}
+            # A live refresh token still needs its access record so a chain revocation can find it.
+            linked = {record.access_jti for record in self._refresh.values() if record.active}
+            self._access = {k: v for k, v in self._access.items() if not v.expired or k in linked}
         self._codes = {k: v for k, v in self._codes.items() if v.expires_at >= now}

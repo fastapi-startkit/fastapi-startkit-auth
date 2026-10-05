@@ -78,6 +78,7 @@ class AuthRefreshToken(_AuthModel):
     revoked: bool
     created_at: float
     resource: str
+    family_id: str
 
 
 class AuthCode(_AuthModel):
@@ -93,6 +94,21 @@ class AuthCode(_AuthModel):
     code_challenge_method: str
     expires_at: float
     resource: str
+
+
+class AuthOAuthClient(_AuthModel):
+    __table__ = "oauth_clients"
+    __primary_key__ = "id"
+
+    id: str
+    name: str
+    secret: str
+    redirect_uris: str
+    confidential: bool
+    grant_types: str
+    revoked: bool
+    provider: str
+    created_at: float
 
 
 def query(model: type[Model], connection: str | None = None) -> Any:

@@ -15,6 +15,19 @@ def generate_csrf_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def new_session_record(*, user_id: Any, guard: str, ttl: float | None) -> SessionRecord:
+    now = time.time()
+    return SessionRecord(
+        id=generate_session_id(),
+        user_id=user_id,
+        guard=guard,
+        csrf_token=generate_csrf_token(),
+        created_at=now,
+        last_activity=now,
+        expires_at=(now + ttl) if ttl is not None else None,
+    )
+
+
 @runtime_checkable
 class SessionStore(Protocol):
     """Contract every session backend satisfies.
@@ -26,6 +39,9 @@ class SessionStore(Protocol):
 
     def create(self, *, user_id: Any, guard: str, ttl: float | None) -> SessionRecord:
         """Persist and return a new session with a fresh id and CSRF token."""
+
+    def save(self, record: SessionRecord) -> None:
+        """Persist a record built by ``new_session_record`` (guest sessions are saved lazily)."""
 
     def find(self, session_id: str) -> SessionRecord | None:
         """Return the live session for this id, or ``None`` if unknown/expired."""
@@ -55,18 +71,12 @@ class InMemorySessionStore:
         self._idle_ttl = idle_ttl
 
     def create(self, *, user_id: Any, guard: str, ttl: float | None) -> SessionRecord:
-        now = time.time()
-        record = SessionRecord(
-            id=generate_session_id(),
-            user_id=user_id,
-            guard=guard,
-            csrf_token=generate_csrf_token(),
-            created_at=now,
-            last_activity=now,
-            expires_at=(now + ttl) if ttl is not None else None,
-        )
-        self._sessions[record.id] = record
+        record = new_session_record(user_id=user_id, guard=guard, ttl=ttl)
+        self.save(record)
         return record
+
+    def save(self, record: SessionRecord) -> None:
+        self._sessions[record.id] = record
 
     def find(self, session_id: str) -> SessionRecord | None:
         record = self._sessions.get(session_id)

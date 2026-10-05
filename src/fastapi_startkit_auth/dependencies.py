@@ -9,6 +9,7 @@ from .concurrency import call
 from .exceptions import AuthError, InsufficientScope, InvalidToken
 from .guards.guard import AuthContext
 from .manager import AuthManager
+from .request_context import _auth_request
 
 # auto_error=False so we can raise our own OAuth2-style JSON errors instead of
 # FastAPI's default {"detail": ...} response.
@@ -16,12 +17,37 @@ _bearer = OAuth2PasswordBearer(tokenUrl="oauth/token", auto_error=False)
 
 
 def get_auth_manager(request: Request) -> AuthManager:
+    context = _auth_request.get()
+    if context is not None and context.active:
+        return context.manager
     manager = getattr(request.app.state, "auth_manager", None)
     if manager is None:  # pragma: no cover - misconfiguration guard
-        raise RuntimeError(
-            "No AuthManager on the application. Did you register AuthProvider via Application?"
-        )
+        raise RuntimeError("No AuthManager on the application. Did you register AuthProvider?")
     return manager
+
+
+def _bearer_token(request: Request) -> str | None:
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+async def resolve_context(request: Request, manager: AuthManager, guard: str | None = None) -> AuthContext:
+    """Resolve the request credential through ``guard`` (default guard if ``None``) or raise 401.
+
+    Guards that implement ``authenticate(request)`` (session and token drivers)
+    read the request themselves; the rest take the bearer token. Async guards
+    are awaited; sync guards run in the threadpool.
+    """
+    resolved = manager.guard(guard)
+    authenticate = getattr(resolved, "authenticate", None)
+    if authenticate is not None:
+        return await call(authenticate, request)
+    token = _bearer_token(request)
+    if not token:
+        raise InvalidToken("Not authenticated.")
+    return await call(resolved.user_from_token, token)
 
 
 async def current_context(
@@ -29,20 +55,15 @@ async def current_context(
     token: str | None = Depends(_bearer),
     manager: AuthManager = Depends(get_auth_manager),
 ) -> AuthContext:
-    """Resolve the request credential to an :class:`AuthContext` or raise 401.
+    """Resolve the request credential to an :class:`AuthContext` or raise 401."""
+    return await resolve_context(request, manager)
 
-    The default guard decides the mechanism: guards that implement
-    ``authenticate(request)`` (session driver) read the request/cookie state,
-    everything else takes the bearer-token path. Route code is identical either
-    way. Async guards are awaited; sync guards run in the threadpool.
-    """
-    guard = manager.guard()
-    authenticate = getattr(guard, "authenticate", None)
-    if authenticate is not None:
-        return await call(authenticate, request)
-    if not token:
-        raise InvalidToken("Not authenticated.")
-    return await call(guard.user_from_token, token)
+
+async def auth(context: AuthContext = Depends(current_context)) -> AuthContext:
+    """Like ``current_context`` but also rejects user-less (client_credentials) tokens."""
+    if context.user is None:
+        raise InvalidToken("This token is not associated with a user.")
+    return context
 
 
 def current_user(context: AuthContext = Depends(current_context)) -> Any:
@@ -58,14 +79,8 @@ async def optional_user(
     manager: AuthManager = Depends(get_auth_manager),
 ) -> Any | None:
     """Return the authenticated user, or ``None`` if unauthenticated/invalid."""
-    guard = manager.guard()
-    authenticate = getattr(guard, "authenticate", None)
     try:
-        if authenticate is not None:
-            return (await call(authenticate, request)).user
-        if not token:
-            return None
-        return (await call(guard.user_from_token, token)).user
+        return (await resolve_context(request, manager)).user
     except AuthError:
         return None
 

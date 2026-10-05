@@ -3,13 +3,14 @@ from __future__ import annotations
 import secrets
 import time
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
+from ..concurrency import call
 from ..exceptions import InvalidGrant, InvalidToken
 from ..policy import ensure_same_resource
 from ..security.jwt import JWTEncoder
-from ..concurrency import call
 from .models import AccessTokenRecord, RefreshTokenRecord
 from .repository import InMemoryTokenRepository
 
@@ -59,16 +60,26 @@ def _encode_access_token(
 
 
 def _refreshed_scopes(
-    record: RefreshTokenRecord | None, scopes: list[str] | None, resource: str | None
+    record: RefreshTokenRecord | None,
+    scopes: list[str] | None,
+    resource: str | None,
+    client_id: str | None,
 ) -> list[str]:
     if record is None or not record.active:
         raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
+    if client_id is not None and record.client_id != client_id:
+        raise InvalidGrant("The refresh token was issued to a different client.")
     ensure_same_resource(record.resource, resource)
     if scopes is None:
         return list(record.scopes)
     if set(scopes) - set(record.scopes):
         raise InvalidGrant("Requested scopes exceed those of the original grant.")
     return list(scopes)
+
+
+def _bound_to(record: AccessTokenRecord | RefreshTokenRecord, client_id: str, allow_unbound: bool) -> bool:
+    # Only the password grant issues client-less tokens, so they are honoured only while it is enabled.
+    return record.client_id == client_id or (allow_unbound and record.client_id is None)
 
 
 def _introspection(record: AccessTokenRecord, claims: dict[str, Any]) -> dict[str, Any]:
@@ -88,13 +99,43 @@ def _introspection(record: AccessTokenRecord, claims: dict[str, Any]) -> dict[st
     return result
 
 
+def _refresh_introspection(record: RefreshTokenRecord) -> dict[str, Any]:
+    if not record.active:
+        return {"active": False}
+    result = {
+        "active": True,
+        "scope": " ".join(record.scopes),
+        "client_id": record.client_id,
+        "sub": None if record.user_id is None else str(record.user_id),
+        "token_type": "refresh_token",
+        "exp": None if record.expires_at is None else int(record.expires_at),
+        "iat": int(record.created_at),
+    }
+    if record.resource is not None:
+        result["aud"] = record.resource
+    return result
+
+
+def _owned_by(record: AccessTokenRecord | None, user_id: Any, personal_access: bool | None) -> bool:
+    if record is None or record.user_id != user_id:
+        return False
+    return personal_access is None or record.personal_access == personal_access
+
+
+def _decoded_jti(encoder: JWTEncoder, token: str) -> str | None:
+    try:
+        return encoder.decode(token, verify_exp=False, verify_audience=False).get("jti")
+    except InvalidToken:
+        return None
+
+
 class TokenService:
     """Mints, rotates, revokes, and introspects tokens.
 
     Access tokens are signed JWTs; a server-side record per ``jti`` enables
     revocation and introspection. Refresh tokens are opaque high-entropy strings
-    mapped to stored records, and are rotated (old access + refresh revoked) on
-    every use.
+    mapped to stored records and rotated on every use; every rotation of one
+    grant shares a family, and replaying a rotated-out token revokes the family.
     """
 
     def __init__(
@@ -121,6 +162,9 @@ class TokenService:
             self._last_purge = now
             self.repository.purge_expired()
 
+    def _refresh_lock(self) -> Any:
+        return getattr(self.repository, "refresh_lock", None) or nullcontext()
+
     def issue(
         self,
         *,
@@ -132,6 +176,7 @@ class TokenService:
         name: str | None = None,
         personal_access: bool = False,
         audience: str | None = None,
+        refresh_family_id: str | None = None,
     ) -> IssuedToken:
         self._maybe_purge()
         ttl = self.access_ttl if ttl is None else ttl
@@ -147,7 +192,17 @@ class TokenService:
         )
         refresh_token = None
         if with_refresh:
-            refresh_token = self._issue_refresh(jti, user_id, client_id, scopes, audience)
+            refresh_token = secrets.token_urlsafe(48)
+            self.repository.store_refresh_token(
+                token_id=refresh_token,
+                access_jti=jti,
+                user_id=user_id,
+                client_id=client_id,
+                scopes=list(scopes),
+                expires_at=time.time() + self.refresh_ttl,
+                resource=audience,
+                family_id=refresh_family_id,
+            )
         return IssuedToken(
             access_token=access_token,
             token_type="Bearer",
@@ -156,19 +211,6 @@ class TokenService:
             jti=jti,
             refresh_token=refresh_token,
         )
-
-    def _issue_refresh(self, access_jti: str, user_id, client_id, scopes, resource: str | None) -> str:
-        token_id = secrets.token_urlsafe(48)
-        self.repository.store_refresh_token(
-            token_id=token_id,
-            access_jti=access_jti,
-            user_id=user_id,
-            client_id=client_id,
-            scopes=list(scopes),
-            expires_at=time.time() + self.refresh_ttl,
-            resource=resource,
-        )
-        return token_id
 
     def create_personal_access_token(
         self, *, user_id: Any, name: str, scopes: list[str], ttl: int | None = None
@@ -183,22 +225,27 @@ class TokenService:
         )
 
     def refresh(
-        self, refresh_token: str, scopes: list[str] | None = None, resource: str | None = None
+        self,
+        refresh_token: str,
+        scopes: list[str] | None = None,
+        resource: str | None = None,
+        client_id: str | None = None,
     ) -> IssuedToken:
-        record = self.repository.find_refresh_token(refresh_token)
-        new_scopes = _refreshed_scopes(record, scopes, resource)
-
-        # Rotate: revoke the previous access + refresh pair before minting a new one.
-        self.repository.revoke_access_token(record.access_jti)
-        self.repository.revoke_refresh_token(record.token_id)
-
-        return self.issue(
-            user_id=record.user_id,
-            client_id=record.client_id,
-            scopes=new_scopes,
-            with_refresh=True,
-            audience=record.resource,
-        )
+        # Held across rotation so a concurrent replay revokes the family only after the new pair has joined it.
+        with self._refresh_lock():
+            record = self.repository.find_refresh_token(refresh_token)
+            new_scopes = _refreshed_scopes(record, scopes, resource, client_id)
+            if self.repository.consume_refresh_token(refresh_token) is None:
+                raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
+            self.repository.revoke_access_token(record.access_jti)
+            return self.issue(
+                user_id=record.user_id,
+                client_id=record.client_id,
+                scopes=new_scopes,
+                with_refresh=True,
+                audience=record.resource,
+                refresh_family_id=record.family_id,
+            )
 
     def authenticate(self, access_token: str, audience: str | None = None) -> dict[str, Any]:
         return self._active(self.encoder.decode(access_token, audience=audience))
@@ -215,9 +262,37 @@ class TokenService:
     def revoke_refresh(self, token_id: str) -> bool:
         return self.repository.revoke_refresh_token(token_id)
 
-    def introspect(self, access_token: str) -> dict[str, Any]:
+    def tokens_for(self, user_id: Any, personal_access: bool | None = None) -> list[AccessTokenRecord]:
+        return [r for r in self.repository.list_access_tokens(user_id, personal_access) if not r.revoked]
+
+    def revoke_for_user(self, jti: str, user_id: Any, personal_access: bool | None = None) -> bool:
+        if not _owned_by(self.repository.find_access_token(jti), user_id, personal_access):
+            return False
+        return self.repository.revoke_token_chain(jti)
+
+    def revoke_all_for_user(self, user_id: Any, personal_access: bool | None = None) -> int:
+        with self._refresh_lock():
+            records = self.tokens_for(user_id, personal_access)
+            return sum(bool(self.repository.revoke_token_chain(r.jti)) for r in records)
+
+    def revoke_token(self, token: str, client_id: str, allow_unbound: bool = False) -> bool:
+        """RFC 7009: revoke an access or refresh token, with its whole chain, on behalf of ``client_id``."""
+        record: AccessTokenRecord | RefreshTokenRecord | None = self.repository.find_refresh_token(token)
+        if record is not None:
+            jti = record.access_jti
+        else:
+            jti = _decoded_jti(self.encoder, token)
+            record = None if jti is None else self.repository.find_access_token(jti)
+        if record is None or not _bound_to(record, client_id, allow_unbound):
+            return False
+        return self.repository.revoke_token_chain(jti)
+
+    def introspect(self, token: str) -> dict[str, Any]:
+        refresh = self.repository.find_refresh_token(token)
+        if refresh is not None:
+            return _refresh_introspection(refresh)
         try:
-            claims = self._active(self.encoder.decode(access_token, verify_audience=False))
+            claims = self._active(self.encoder.decode(token, verify_audience=False))
         except InvalidToken:
             return {"active": False}
         return _introspection(self.repository.find_access_token(claims["jti"]), claims)
@@ -258,6 +333,7 @@ class AsyncTokenService:
         name: str | None = None,
         personal_access: bool = False,
         audience: str | None = None,
+        refresh_family_id: str | None = None,
     ) -> IssuedToken:
         await self._maybe_purge()
         ttl = self.access_ttl if ttl is None else ttl
@@ -284,6 +360,7 @@ class AsyncTokenService:
                 scopes=list(scopes),
                 expires_at=time.time() + self.refresh_ttl,
                 resource=audience,
+                family_id=refresh_family_id,
             )
         return IssuedToken(
             access_token=access_token,
@@ -307,11 +384,16 @@ class AsyncTokenService:
         )
 
     async def refresh(
-        self, refresh_token: str, scopes: list[str] | None = None, resource: str | None = None
+        self,
+        refresh_token: str,
+        scopes: list[str] | None = None,
+        resource: str | None = None,
+        client_id: str | None = None,
     ) -> IssuedToken:
         record = await call(self.repository.find_refresh_token, refresh_token)
-        new_scopes = _refreshed_scopes(record, scopes, resource)
-        if not await call(self.repository.revoke_refresh_token, record.token_id):
+        new_scopes = _refreshed_scopes(record, scopes, resource, client_id)
+        # The repository's atomic consume picks one winner; replaying a used token revokes its family.
+        if await call(self.repository.consume_refresh_token, refresh_token) is None:
             raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
         await call(self.repository.revoke_access_token, record.access_jti)
         return await self.issue(
@@ -320,6 +402,7 @@ class AsyncTokenService:
             scopes=new_scopes,
             with_refresh=True,
             audience=record.resource,
+            refresh_family_id=record.family_id,
         )
 
     async def authenticate(self, access_token: str, audience: str | None = None) -> dict[str, Any]:
@@ -337,9 +420,39 @@ class AsyncTokenService:
     async def revoke_refresh(self, token_id: str) -> bool:
         return await call(self.repository.revoke_refresh_token, token_id)
 
-    async def introspect(self, access_token: str) -> dict[str, Any]:
+    async def tokens_for(self, user_id: Any, personal_access: bool | None = None) -> list[AccessTokenRecord]:
+        records = await call(self.repository.list_access_tokens, user_id, personal_access)
+        return [r for r in records if not r.revoked]
+
+    async def revoke_for_user(self, jti: str, user_id: Any, personal_access: bool | None = None) -> bool:
+        if not _owned_by(await call(self.repository.find_access_token, jti), user_id, personal_access):
+            return False
+        return await call(self.repository.revoke_token_chain, jti)
+
+    async def revoke_all_for_user(self, user_id: Any, personal_access: bool | None = None) -> int:
+        revoked = 0
+        for record in await self.tokens_for(user_id, personal_access):
+            revoked += bool(await call(self.repository.revoke_token_chain, record.jti))
+        return revoked
+
+    async def revoke_token(self, token: str, client_id: str, allow_unbound: bool = False) -> bool:
+        """RFC 7009: revoke an access or refresh token, with its whole chain, on behalf of ``client_id``."""
+        record: AccessTokenRecord | RefreshTokenRecord | None = await call(self.repository.find_refresh_token, token)
+        if record is not None:
+            jti = record.access_jti
+        else:
+            jti = _decoded_jti(self.encoder, token)
+            record = None if jti is None else await call(self.repository.find_access_token, jti)
+        if record is None or not _bound_to(record, client_id, allow_unbound):
+            return False
+        return await call(self.repository.revoke_token_chain, jti)
+
+    async def introspect(self, token: str) -> dict[str, Any]:
+        refresh = await call(self.repository.find_refresh_token, token)
+        if refresh is not None:
+            return _refresh_introspection(refresh)
         try:
-            claims = await self._active(self.encoder.decode(access_token, verify_audience=False))
+            claims = await self._active(self.encoder.decode(token, verify_audience=False))
         except InvalidToken:
             return {"active": False}
         return _introspection(await call(self.repository.find_access_token, claims["jti"]), claims)
