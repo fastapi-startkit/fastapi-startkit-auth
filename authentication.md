@@ -537,17 +537,16 @@ family is the chain of tokens that descends from one grant.
 
 **Reuse detection.** Presenting a refresh token that was already rotated out is
 treated as theft. It fails with `invalid_grant` and revokes the token's whole
-family, so the attacker and the legitimate client must both start over. That
-covers:
+family, so the attacker and the legitimate client must both start over.
 
-- a used token replayed by the client it was issued to
-- a used unbound (password-grant) token replayed without client credentials
-
-Replaying a used token through a different authenticated client is rejected
-with `invalid_grant`, but on the current release it does not revoke the family.
-Presenting a token that has not been used yet through the wrong client is also
-rejected, and the family stays intact. A request whose client credentials fail
-gets `invalid_client` and changes nothing.
+Replaying a used token revokes its whole family whoever presents it: the client
+it was issued to, any other successfully authenticated client, or (for an
+unbound password-grant token) no client at all. A used client-bound token
+presented with no `client_id` fails with `invalid_client` before reaching the
+grant, so the family is left intact; a request whose client credentials fail
+also gets `invalid_client` and changes nothing. Presenting an unused token
+through the wrong client is rejected with `invalid_grant` and leaves the family
+intact.
 
 Rotation and code redemption are atomic. Under concurrent requests exactly one
 wins, including across workers with the database store.

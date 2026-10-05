@@ -280,8 +280,7 @@ Clients are created with `python artisan auth:oauth2:client --name app
 --redirect-uri https://app/cb [--public]` or
 `manager.client_repository.register(...)`; there are no `/oauth/clients` HTTP
 routes. Refresh tokens are bound to their client. Replaying a rotated refresh
-token through its own client (or, for an unbound password-grant token, without
-client credentials) revokes its whole family; see
+token revokes its whole family, whoever presents it; see
 [Refresh tokens](authentication.md#refresh-tokens).
 
 ### Example: password grant
