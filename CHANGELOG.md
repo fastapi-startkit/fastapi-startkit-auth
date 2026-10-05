@@ -83,7 +83,8 @@ using the ORM stores:
 ### Added
 
 - Refresh token families with reuse detection: replaying a rotated refresh token
-  revokes the whole family. Refresh tokens are introspectable.
+  revokes the whole family, including when another authenticated client
+  presents it. Refresh tokens are introspectable.
 - `POST /oauth/revoke` (RFC 7009) revokes the token and its access/refresh chain;
   `GET`/`DELETE /oauth/tokens` and `DELETE /oauth/tokens/{jti}` let a user list
   and revoke their OAuth tokens. `DELETE /oauth/personal-access-tokens` revokes

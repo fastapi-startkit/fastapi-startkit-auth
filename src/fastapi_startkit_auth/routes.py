@@ -222,7 +222,9 @@ def build_router(prefix: str = "") -> APIRouter:
                 if not client_id:
                     raise InvalidClient("client_id is required for this refresh token.")
                 await _authenticate_client(manager, client_id, client_secret, "refresh_token")
-                if record.client_id != client_id:
+                # A used token replayed by any authenticated client is reuse (RFC 9700 §4.14.2):
+                # the grant below revokes its family before rejecting it.
+                if record.client_id != client_id and not record.revoked:
                     raise InvalidGrant("The refresh token was issued to a different client.")
             elif client_id or not manager.grant_enabled("password"):
                 # Only the password grant issues client-less refresh tokens.

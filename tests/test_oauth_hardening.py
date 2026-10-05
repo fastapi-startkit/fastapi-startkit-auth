@@ -68,6 +68,62 @@ async def test_orm_replay_revokes_the_family(orm_database):
         await service.authenticate(third.access_token)
 
 
+def test_cross_client_replay_of_a_used_refresh_token_revokes_the_family():
+    http, _ = make_auth_client()
+    owner = register_client(http, name="Owner", grant_types=["client_credentials", "refresh_token"])
+    other = register_client(http, name="Other", grant_types=["client_credentials", "refresh_token"])
+    owner_auth = (owner["id"], owner["secret"])
+    service = http.app.state.auth_manager.token_service
+    first = service.issue(user_id=1, client_id=owner["id"], scopes=[], with_refresh=True)
+    rotated = http.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": first.refresh_token}, auth=owner_auth)
+    assert rotated.status_code == 200, rotated.text
+    tokens = rotated.json()
+
+    replay = http.post(
+        "/oauth/token",
+        data={"grant_type": "refresh_token", "refresh_token": first.refresh_token},
+        auth=(other["id"], other["secret"]),
+    )
+    assert replay.status_code == 400
+    assert replay.json()["error"] == "invalid_grant"
+
+    with pytest.raises(InvalidToken):
+        service.authenticate(tokens["access_token"])
+    after = http.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}, auth=owner_auth)
+    assert after.status_code == 400
+
+
+def test_cross_client_presentation_of_an_unused_refresh_token_leaves_the_family_intact():
+    http, _ = make_auth_client()
+    owner = register_client(http, name="Owner", grant_types=["client_credentials", "refresh_token"])
+    other = register_client(http, name="Other", grant_types=["client_credentials", "refresh_token"])
+    service = http.app.state.auth_manager.token_service
+    issued = service.issue(user_id=1, client_id=owner["id"], scopes=[], with_refresh=True)
+
+    response = http.post(
+        "/oauth/token",
+        data={"grant_type": "refresh_token", "refresh_token": issued.refresh_token},
+        auth=(other["id"], other["secret"]),
+    )
+    assert response.status_code == 400
+    assert service.authenticate(issued.access_token)["sub"] == "1"
+
+
+async def test_async_cross_client_replay_revokes_the_family(orm_database):
+    from fastapi_startkit_auth.tokens.orm import OrmTokenRepository
+
+    service = AsyncTokenService(encoder=JWTEncoder(secret=SECRET), repository=OrmTokenRepository(orm_database))
+    first = await service.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
+    second = await service.refresh(first.refresh_token, client_id="c1")
+
+    with pytest.raises(InvalidGrant):
+        await service.refresh(first.refresh_token, client_id="c2")
+    with pytest.raises(InvalidGrant):
+        await service.refresh(second.refresh_token, client_id="c1")
+    with pytest.raises(InvalidToken):
+        await service.authenticate(second.access_token)
+
+
 # --- unbound (password grant) refresh tokens --------------------------------
 
 
