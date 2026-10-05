@@ -27,6 +27,12 @@ class Client:
     provider: str | None = None
     scopes: list[str] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        # list("read") would silently become ["r", "e", "a", "d"].
+        if isinstance(self.scopes, str):
+            raise TypeError("Client.scopes must be a list of scope names, not a string.")
+        self.scopes = list(self.scopes)
+
     def allows_redirect(self, uri: str) -> bool:
         return uri in self.redirect_uris
 

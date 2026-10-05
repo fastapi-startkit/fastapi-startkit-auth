@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..clients.models import Client
 from ..concurrency import call, ensure_sync
 from ..exceptions import InvalidGrant
 from ..policy import GrantPolicy
@@ -15,18 +16,32 @@ def _credentials(username: str, password: str) -> dict[str, str]:
     return {"username": username, "email": username, "password": password}
 
 
+def _check(policy: GrantPolicy, client: Client | None, scopes: list[str]) -> None:
+    policy.check_scopes(scopes)
+    if client is not None:
+        policy.check_client_scopes(client, scopes)
+
+
 class PasswordGrant:
-    """Resource-owner password credentials grant (RFC 6749 §4.3)."""
+    """Resource-owner password credentials grant (RFC 6749 §4.3).
+
+    A ``client`` that authenticated the request limits the grantable scopes to its allow-list.
+    """
 
     def __init__(
-        self, token_service: TokenService, user_provider: UserProvider, policy: GrantPolicy | None = None
+        self,
+        token_service: TokenService,
+        user_provider: UserProvider,
+        policy: GrantPolicy | None = None,
+        client: Client | None = None,
     ) -> None:
         self._tokens = token_service
         self._users = user_provider
         self._policy = policy or GrantPolicy()
+        self._client = client
 
     def handle(self, *, username: str, password: str, scopes: list[str], client_id: str | None) -> IssuedToken:
-        self._policy.check_scopes(scopes)
+        _check(self._policy, self._client, scopes)
         credentials = _credentials(username, password)
         user = ensure_sync(self._users.retrieve_by_credentials(credentials), "retrieve_by_credentials")
         if user is None:
@@ -48,13 +63,20 @@ class PasswordGrant:
 
 
 class AsyncPasswordGrant:
-    def __init__(self, token_service: Any, user_provider: Any, policy: GrantPolicy | None = None) -> None:
+    def __init__(
+        self,
+        token_service: Any,
+        user_provider: Any,
+        policy: GrantPolicy | None = None,
+        client: Client | None = None,
+    ) -> None:
         self._tokens = token_service
         self._users = user_provider
         self._policy = policy or GrantPolicy()
+        self._client = client
 
     async def handle(self, *, username: str, password: str, scopes: list[str], client_id: str | None) -> IssuedToken:
-        self._policy.check_scopes(scopes)
+        _check(self._policy, self._client, scopes)
         credentials = _credentials(username, password)
         user = await call(self._users.retrieve_by_credentials, credentials)
         if user is None:

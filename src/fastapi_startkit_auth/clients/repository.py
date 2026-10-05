@@ -42,7 +42,7 @@ class InMemoryClientRepository:
             confidential=confidential,
             grant_types=list(grant_types or []),
             provider=provider,
-            scopes=list(scopes or []),
+            scopes=[] if scopes is None else scopes,
         )
         self._clients[client_id] = client
         return client, plain_secret

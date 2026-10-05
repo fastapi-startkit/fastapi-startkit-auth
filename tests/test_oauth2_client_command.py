@@ -117,6 +117,13 @@ def test_scopes_option_restricts_the_client(client_database):
     assert "Allowed scopes: read write" in tester.io.fetch_output()
 
 
+def test_star_scope_is_refused(client_database):
+    tester, manager = create_command()
+    assert tester.execute("--public --name=Agent --redirect-uri=https://agent.example/cb --scopes='read *'") == 1
+    assert "* grants every ability; list explicit scopes." in tester.io.fetch_error()
+    assert asyncio.run(manager.client_repository.all()) == []
+
+
 def test_omitting_scopes_leaves_the_client_unrestricted(client_database):
     tester, manager = create_command()
     assert tester.execute("--public --name=Agent --redirect-uri=https://agent.example/cb") == 0

@@ -107,7 +107,9 @@ using the ORM stores:
   request (empty means any). A request outside the list, including
   `default_scopes` applied to a request naming none, fails with `invalid_scope`
   on `/oauth/authorize`, the `client_credentials` grant and the password grant
-  when a client authenticates. `"*"` is an ordinary scope here, not a wildcard.
+  when a client authenticates. `"*"` is not expanded when matching the allow-list, but a token granted `"*"`
+  passes every `require_scopes` check, so never give a client `"*"` (the command
+  refuses it).
   Set it with `auth:oauth2:client --scopes`; client repositories gain `revoke`.
 - `AuthMiddleware` and request-scoped facades: `Auth.user()`, `Session.token()`,
   `ApiToken.create(...)` work on the class inside a request. `Auth.validate`

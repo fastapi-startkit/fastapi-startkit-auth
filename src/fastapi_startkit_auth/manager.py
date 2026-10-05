@@ -527,7 +527,7 @@ class AuthManager:
         if provider is None:
             provider = self.guard(guard).provider
         grant_class = AsyncPasswordGrant if self._grants_async(provider) else PasswordGrant
-        return grant_class(self.token_service, provider, self.grant_policy)
+        return grant_class(self.token_service, provider, self.grant_policy, client)
 
     def client_credentials_grant(self) -> ClientCredentialsGrant | AsyncClientCredentialsGrant:
         grant_class = AsyncClientCredentialsGrant if self._tokens_async() else ClientCredentialsGrant

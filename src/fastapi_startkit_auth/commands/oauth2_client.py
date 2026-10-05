@@ -40,6 +40,9 @@ class OAuth2ClientCommand(Command):
             return 1
         manager = self.container.make("auth_manager")
         scopes = list(dict.fromkeys(scope for value in self.option("scopes") for scope in value.split()))
+        if "*" in scopes:
+            self.line_error("* grants every ability; list explicit scopes.")
+            return 1
         try:
             manager.grant_policy.check_scopes(scopes)
         except InvalidScope as error:

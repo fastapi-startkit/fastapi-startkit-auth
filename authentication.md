@@ -457,7 +457,12 @@ with no secret and PKCE required). An empty `grant_types` allows every enabled
 grant, and an empty `scopes` allows every catalog scope. A non-empty `scopes`
 limits what the client may request: anything outside it, including
 `default_scopes` filled in for a request naming none, fails with
-`invalid_scope`. `"*"` in that list is a literal scope, not a wildcard.
+`invalid_scope`. `"*"` is not expanded when matching the allow-list, but a
+token granted `"*"` passes every `require_scopes` check, so never give a client
+`"*"` (the command refuses it). Tightening a client's allow-list is not
+retroactive: refresh tokens it already holds keep their granted scopes until
+their family expires or is revoked (a refresh can only narrow scopes, never widen
+them).
 
 Under Startkit, create clients with the command:
 

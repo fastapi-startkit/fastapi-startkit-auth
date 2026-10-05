@@ -11,6 +11,7 @@ from fastapi_startkit_auth.clients.models import Client
 from fastapi_startkit_auth.clients.repository import InMemoryClientRepository
 from fastapi_startkit_auth.exceptions import InvalidScope
 from fastapi_startkit_auth.grants.client_credentials import AsyncClientCredentialsGrant
+from fastapi_startkit_auth.grants.password import AsyncPasswordGrant
 from fastapi_startkit_auth.policy import GrantPolicy
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 
@@ -197,6 +198,47 @@ def test_password_route_enforces_client_scopes():
 def test_password_route_without_a_client_is_unrestricted():
     client, _ = make_auth_client(oauth2=_oauth2())
     assert _password(client, scope="write").status_code == 200
+
+
+def test_programmatic_password_grant_enforces_client_scopes():
+    client, _ = make_auth_client(oauth2=_oauth2())
+    manager = client.app.state.auth_manager
+    restricted = Client(id="cli", name="cli", scopes=["read"])
+    grant = manager.password_grant(client=restricted)
+
+    with pytest.raises(InvalidScope):
+        grant.handle(username="ada@example.com", password="secret", scopes=["write"], client_id=restricted.id)
+    issued = grant.handle(username="ada@example.com", password="secret", scopes=["read"], client_id=restricted.id)
+    assert issued.scopes == ["read"]
+
+
+async def test_async_password_grant_checks_client_scopes_before_credentials():
+    class Users:
+        async def retrieve_by_credentials(self, credentials):
+            raise AssertionError("credentials must not be checked")
+
+    grant = AsyncPasswordGrant(None, Users(), client=Client(id="cli", name="cli", scopes=["read"]))
+    with pytest.raises(InvalidScope):
+        await grant.handle(username="ada", password="secret", scopes=["write"], client_id="cli")
+
+
+# --- scopes must be a list ----------------------------------------------------
+
+
+def test_string_scopes_are_rejected():
+    with pytest.raises(TypeError):
+        Client(id="c", name="c", scopes="read")
+    with pytest.raises(TypeError):
+        InMemoryClientRepository(hasher=BcryptHasher(rounds=4)).register(name="svc", scopes="read")
+
+
+async def test_orm_register_rejects_string_scopes(orm_database):
+    from fastapi_startkit_auth import orm
+    from fastapi_startkit_auth.clients.orm import OrmClientRepository
+
+    with pytest.raises(TypeError):
+        await OrmClientRepository(orm_database, hasher=BcryptHasher(rounds=4)).register(name="svc", scopes="read")
+    assert await orm.query(orm.AuthOAuthClient, orm_database).get() == []
 
 
 # --- authorization code -------------------------------------------------------
