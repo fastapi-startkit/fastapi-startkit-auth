@@ -6,7 +6,7 @@ from fastapi_startkit_auth import AuthConfig, GrantPolicy
 from fastapi_startkit_auth.clients.models import Client
 from fastapi_startkit_auth.exceptions import InvalidGrant, InvalidRequest, InvalidScope, InvalidTarget, InvalidToken
 from fastapi_startkit_auth.grants.authorization_code import AuthorizationCodeGrant
-from fastapi_startkit_auth.grants.refresh import AsyncRefreshTokenGrant
+from fastapi_startkit_auth.grants.refresh import AsyncRefreshTokenGrant, RefreshTokenGrant
 from fastapi_startkit_auth.guards.guard import AsyncPassportGuard
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
@@ -391,9 +391,8 @@ def test_repeated_resource_is_refused():
 
 
 def test_refresh_over_http_is_bound_to_the_issuing_client():
-    application = Application([(AuthProvider, _config())])
-    client = TestClient(application.api)
-    repository = application.api.state.auth_manager.client_repository
+    client, manager = _app()
+    repository = manager.client_repository
     owner, owner_secret = repository.register(name="owner", grant_types=["password", "refresh_token"])
     other, other_secret = repository.register(name="other", grant_types=["password", "refresh_token"])
     issued = client.post(
@@ -414,18 +413,48 @@ def test_refresh_over_http_is_bound_to_the_issuing_client():
         )
 
     assert refresh(client_id=other.id, client_secret=other_secret).json()["error"] == "invalid_grant"
-    assert refresh().json()["error"] == "invalid_grant"
+    assert refresh().json()["error"] == "invalid_client"
     assert refresh(client_id=owner.id, client_secret=owner_secret).status_code == 200
 
 
 async def test_async_refresh_is_bound_to_the_issuing_client():
-    service = AsyncTokenService(encoder=JWTEncoder(secret=_config().key), repository=InMemoryTokenRepository())
+    service = AsyncTokenService(encoder=JWTEncoder(secret=KEY), repository=InMemoryTokenRepository())
     grant = AsyncRefreshTokenGrant(service)
     issued = await service.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
 
     with pytest.raises(InvalidGrant):
         await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c2")
     assert (await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")).access_token
+
+
+@pytest.mark.parametrize("bound_to, replayed_by", [("c1", "c2"), ("c1", None), (None, "c1")])
+def test_replaying_a_used_refresh_token_revokes_the_family_whoever_presents_it(bound_to, replayed_by):
+    service = TokenService(encoder=JWTEncoder(secret=KEY), repository=InMemoryTokenRepository())
+    grant = RefreshTokenGrant(service)
+    issued = service.issue(user_id=1, client_id=bound_to, scopes=["read"], with_refresh=True)
+    rotated = grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=bound_to)
+
+    with pytest.raises(InvalidGrant):
+        grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=replayed_by)
+    with pytest.raises(InvalidToken):
+        service.authenticate(rotated.access_token)
+    with pytest.raises(InvalidGrant):
+        grant.handle(refresh_token=rotated.refresh_token, scopes=None, client_id=bound_to)
+
+
+@pytest.mark.parametrize("bound_to, replayed_by", [("c1", "c2"), ("c1", None), (None, "c1")])
+async def test_async_replaying_a_used_refresh_token_revokes_the_family_whoever_presents_it(bound_to, replayed_by):
+    service = AsyncTokenService(encoder=JWTEncoder(secret=KEY), repository=InMemoryTokenRepository())
+    grant = AsyncRefreshTokenGrant(service)
+    issued = await service.issue(user_id=1, client_id=bound_to, scopes=["read"], with_refresh=True)
+    rotated = await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=bound_to)
+
+    with pytest.raises(InvalidGrant):
+        await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=replayed_by)
+    with pytest.raises(InvalidToken):
+        await service.authenticate(rotated.access_token)
+    with pytest.raises(InvalidGrant):
+        await grant.handle(refresh_token=rotated.refresh_token, scopes=None, client_id=bound_to)
 
 
 def test_empty_resource_is_treated_as_absent_under_the_default_config(s256):
