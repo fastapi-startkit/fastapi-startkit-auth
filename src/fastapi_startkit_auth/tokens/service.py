@@ -398,11 +398,9 @@ class AsyncTokenService:
             # A replayed, rotated-out token: consuming it revokes the whole family.
             await call(self.repository.consume_refresh_token, refresh_token)
         new_scopes = _refreshed_scopes(record, scopes, resource, client_id)
-        # The repository's atomic consume picks one winner; replaying a used token revokes its family.
-        if await call(self.repository.consume_refresh_token, refresh_token) is None:
-            raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
-        await call(self.repository.revoke_access_token, record.access_jti)
-        return await self.issue(
+        # There is no lock shared across workers, so the successor joins the family before the old
+        # token is consumed: any replay that sees the token used then revokes the successor too.
+        issued = await self.issue(
             user_id=record.user_id,
             client_id=record.client_id,
             scopes=new_scopes,
@@ -410,6 +408,13 @@ class AsyncTokenService:
             audience=record.resource,
             refresh_family_id=record.family_id,
         )
+        # The repository's atomic consume picks one winner; replaying a used token revokes its family.
+        if await call(self.repository.consume_refresh_token, refresh_token) is None:
+            await call(self.repository.revoke_refresh_token, issued.refresh_token)
+            await call(self.repository.revoke_access_token, issued.jti)
+            raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
+        await call(self.repository.revoke_access_token, record.access_jti)
+        return issued
 
     async def authenticate(self, access_token: str, audience: str | None = None) -> dict[str, Any]:
         return await self._active(self.encoder.decode(access_token, audience=audience))
