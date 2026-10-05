@@ -98,7 +98,7 @@ def make_config(*, default_guard="api", provider=None):
 
 
 def install(api, connection=None, *, session=None, **kwargs):
-    stores = {"store": "orm", "connection": connection} if connection is not None else {"store": "memory"}
+    stores = {"store": "database", "connection": connection} if connection is not None else {"store": "memory"}
     return register_auth(
         api,
         make_config(**kwargs),

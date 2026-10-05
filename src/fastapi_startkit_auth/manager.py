@@ -55,7 +55,7 @@ _REMOVED_STORES = ("sql", "async_sql")
 def _reject_removed_store(kind: str, section: str) -> None:
     if kind in _REMOVED_STORES:
         raise ValueError(
-            f'{section} store "{kind}" was removed: use store "orm" (optional ORM '
+            f'{section} store "{kind}" was removed: use store "database" (optional ORM '
             '"connection" name) after running the published migrations.'
         )
 
@@ -332,7 +332,7 @@ class AuthManager:
         config = self.session_config
         if config.store == "memory":
             return InMemorySessionStore(idle_ttl=config.idle_ttl)
-        if config.store in ("orm", "database"):
+        if config.store == "database":
             from .sessions.orm import OrmSessionStore
 
             return OrmSessionStore(config.connection, idle_ttl=config.idle_ttl, purge_interval=config.purge_interval)
@@ -355,7 +355,7 @@ class AuthManager:
     def _build_api_token_repository(self, config: ApiTokenConfig) -> ApiTokenRepository:
         if config.store == "memory":
             return InMemoryApiTokenRepository()
-        if config.store in ("orm", "database"):
+        if config.store == "database":
             from .apitokens.orm import OrmApiTokenRepository
 
             return OrmApiTokenRepository(config.connection)
@@ -368,7 +368,7 @@ class AuthManager:
         tokens = config.tokens
         if tokens.store == "memory":
             return InMemoryTokenRepository()
-        if tokens.store in ("orm", "database"):
+        if tokens.store == "database":
             from .tokens.orm import OrmTokenRepository
 
             return OrmTokenRepository(tokens.connection)
@@ -381,7 +381,7 @@ class AuthManager:
         clients = config.clients
         if clients.store == "memory":
             return InMemoryClientRepository(hasher=self.hasher)
-        if clients.store in ("orm", "database"):
+        if clients.store == "database":
             from .clients.orm import OrmClientRepository
 
             return OrmClientRepository(clients.connection, hasher=self.hasher)

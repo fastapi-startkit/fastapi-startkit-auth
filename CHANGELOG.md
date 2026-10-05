@@ -63,9 +63,13 @@ Each item lists what changed and what to do.
 - **CSRF is always on with sessions**, and also accepts the `_token` form field.
   *Migrate:* send `X-XSRF-TOKEN` (or `_token`) on unsafe requests, or list paths
   in `SessionConfig.csrf_exempt_paths`.
-- **OAuth client store defaults to the ORM** (`oauth_clients` table).
-  *Migrate:* publish and run the migrations, or set
+- **OAuth client store defaults to `"database"`** (the ORM `oauth_clients`
+  table). *Migrate:* publish and run the migrations, or set
   `OAuth2Config(clients=OAuthClientsConfig(store="memory"))`.
+- **Persistent stores are named `"database"`.** `store="orm"` still works for
+  sessions, API tokens, OAuth tokens and OAuth clients, but emits a
+  `DeprecationWarning` and will be removed in a future release. *Migrate:*
+  replace `store="orm"` with `store="database"`.
 - **Custom token repositories** must implement `consume_refresh_token` and
   `revoke_token_chain`, and `store_refresh_token` takes `family_id`.
 - Error responses carry `Cache-Control: no-store`; `invalid_client` challenges

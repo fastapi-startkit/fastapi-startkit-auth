@@ -282,7 +282,7 @@ def test_session_store_config_selects_implementation():
     assert manager.session_store is custom
     with pytest.raises(ValueError, match="Unknown session store"):
         _manager(session={"store": "redis"}).session_store
-    with pytest.raises(ValueError, match='"orm"'):
+    with pytest.raises(ValueError, match='"database"'):
         _manager(session={"store": "sql"}).session_store
 
 

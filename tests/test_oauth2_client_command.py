@@ -41,7 +41,7 @@ def client_database(tmp_path):
 
 OAUTH2 = OAuth2Config(
     key="command-test-key-with-at-least-32-bytes",
-    clients=OAuthClientsConfig(store="orm", connection=ORM_CONNECTION),
+    clients=OAuthClientsConfig(store="database", connection=ORM_CONNECTION),
 )
 
 

@@ -132,7 +132,7 @@ def wire_routes(api):
 
 async def build(connection, **kwargs):
     api = FastAPI()
-    store = {"store": "orm", "connection": connection}
+    store = {"store": "database", "connection": connection}
     manager = register_auth(
         api,
         make_config(connection, **kwargs),
@@ -193,7 +193,7 @@ def test_removed_sql_stores_point_to_the_orm_store(section, removed):
         "tokens": {"oauth2": oauth2_config(tokens={"store": removed})},
     }[section]
     attribute = {"session": "session_store", "api_tokens": "api_tokens", "tokens": "token_repository"}[section]
-    with pytest.raises(ValueError, match='"orm"'):
+    with pytest.raises(ValueError, match='"database"'):
         getattr(auth_manager(Config, **features), attribute)
 
 

@@ -37,7 +37,7 @@ Optional extras:
 
 | Extra | Installs | Use when |
 | --- | --- | --- |
-| `startkit` | `fastapi-startkit[database]>=0.60,<1.0` (Python 3.12+) | Registering the auth providers in a Startkit app, publishing migrations via `provider:publish`, and the `"orm"` stores |
+| `startkit` | `fastapi-startkit[database]>=0.60,<1.0` (Python 3.12+) | Registering the auth providers in a Startkit app, publishing migrations via `provider:publish`, and the `"database"` stores |
 | `masoniteorm` | `masonite-orm` | Using the `masoniteorm` user provider driver |
 
 ```bash
@@ -116,7 +116,7 @@ OAuth2Config(
     require_pkce=True,
     grant_types=["authorization_code", "client_credentials", "refresh_token"],
     tokens=OAuthTokensConfig(store="memory"),
-    clients=OAuthClientsConfig(store="orm"),
+    clients=OAuthClientsConfig(store="database"),  # the default; needs the migrations
 )
 ```
 
@@ -183,9 +183,9 @@ in `fastapi-startkit[database]`). The package ships its own models
 (`fastapi_startkit_auth.orm`) and uses no raw SQL:
 
 ```python
-SessionConfig(store="orm")
-ApiTokenConfig(store="orm")
-OAuth2Config(tokens=OAuthTokensConfig(store="orm", connection="auth"))  # optional ORM connection name
+SessionConfig(store="database")
+ApiTokenConfig(store="database")
+OAuth2Config(tokens=OAuthTokensConfig(store="database", connection="auth"))  # optional ORM connection name
 ```
 
 `connection` names an entry of your database config; omit it to use the default
@@ -205,7 +205,8 @@ through the ORM query builder: refresh-token rotation and authorization-code
 redemption each have exactly one winner under concurrency.
 
 The former `sql` and `async_sql` stores were removed; configuring them raises a
-`ValueError` pointing at `"orm"`. Use `"memory"` or an `"instance"` store for
+`ValueError` pointing at `"database"`. `"orm"` is a deprecated alias of
+`"database"` and emits a `DeprecationWarning`. Use `"memory"` or an `"instance"` store for
 sync setups.
 
 In mixed setups (async stores with a sync provider or a sync session store),

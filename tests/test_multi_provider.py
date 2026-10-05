@@ -72,7 +72,7 @@ def make_config(providers):
 
 
 def install(api, providers, connection=None):
-    stores = {"store": "orm", "connection": connection} if connection is not None else {"store": "memory"}
+    stores = {"store": "database", "connection": connection} if connection is not None else {"store": "memory"}
     oauth2 = oauth2_config(key=KEY, grant_types=list(PASSWORD_GRANTS), tokens=stores)
     return register_auth(api, make_config(providers), oauth2=oauth2)
 

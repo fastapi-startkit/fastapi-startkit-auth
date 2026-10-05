@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 import copy
+import warnings
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, Literal, TypeVar
 
 ConfigT = TypeVar("ConfigT")
+
+
+def _canonical_store(store: str, section: str) -> str:
+    if store == "orm":
+        # stacklevel 4: this helper, __post_init__, the dataclass __init__, then the caller.
+        warnings.warn(
+            f'{section}(store="orm") is deprecated; use store="database".', DeprecationWarning, stacklevel=4
+        )
+        return "database"
+    return store
 
 
 @dataclass
@@ -30,8 +41,8 @@ class ApiTokenGuard:
 class SessionConfig:
     """Cookie sessions, enabled by ``AuthSessionProvider``.
 
-    ``store`` is "memory", "database" (the ORM ``sessions`` table; "orm" is an
-    alias) or "instance" (a ready-made store under ``instance``).
+    ``store`` is "memory", "database" (the ORM ``sessions`` table; "orm" is a
+    deprecated alias) or "instance" (a ready-made store under ``instance``).
     """
 
     store: str = "memory"
@@ -51,6 +62,9 @@ class SessionConfig:
     csrf_field: str = "_token"
     csrf_exempt_paths: list[str] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        self.store = _canonical_store(self.store, "SessionConfig")
+
 
 @dataclass
 class ApiTokenConfig:
@@ -69,6 +83,9 @@ class ApiTokenConfig:
     stateful_origins: list[str] = field(default_factory=list)
     session_guard: str = "web"
 
+    def __post_init__(self) -> None:
+        self.store = _canonical_store(self.store, "ApiTokenConfig")
+
     @property
     def stateful(self) -> bool:
         return bool(self.stateful_origins)
@@ -76,9 +93,14 @@ class ApiTokenConfig:
 
 @dataclass
 class OAuthClientsConfig:
-    store: str = "orm"
+    """Where OAuth clients live: "database" (the ORM ``oauth_clients`` table), "memory" or "instance"."""
+
+    store: str = "database"
     connection: str | None = None
     instance: Any = None
+
+    def __post_init__(self) -> None:
+        self.store = _canonical_store(self.store, "OAuthClientsConfig")
 
 
 @dataclass
@@ -86,6 +108,9 @@ class OAuthTokensConfig:
     store: str = "memory"
     connection: str | None = None
     instance: Any = None
+
+    def __post_init__(self) -> None:
+        self.store = _canonical_store(self.store, "OAuthTokensConfig")
 
 
 DEFAULT_GRANT_TYPES = ("authorization_code", "client_credentials", "refresh_token")
