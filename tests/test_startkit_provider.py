@@ -93,6 +93,7 @@ def test_each_provider_publishes_only_its_own_resources():
         "2026_10_02_000001_add_resource_to_oauth_tables.py",
         "2026_10_04_000001_create_oauth_clients_table.py",
         "2026_10_04_000002_add_family_id_to_oauth_refresh_tokens_table.py",
+        "2026_10_05_000001_add_scopes_to_oauth_clients_table.py",
     ]
     assert app.published_resources["auth-api-token"][str(CORS_STUB)] == "config/cors.py"
     for resources in app.published_resources.values():
@@ -106,7 +107,7 @@ def test_every_shipped_migration_is_published_by_some_provider():
     register_all(app)
     published = {name for key in app.published_resources for name in published_migrations(app, key)}
     assert published == {path.name for path in MIGRATIONS.glob("*.py")}
-    assert len(OAUTH2_MIGRATIONS) == 6
+    assert len(OAUTH2_MIGRATIONS) == 7
 
 
 def test_only_the_oauth2_provider_registers_the_client_command():

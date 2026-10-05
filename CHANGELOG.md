@@ -84,6 +84,8 @@ using the ORM stores:
 - `2026_10_04_000001_create_oauth_clients_table` — the `oauth_clients` table.
 - `2026_10_04_000002_add_family_id_to_oauth_refresh_tokens_table` — a nullable,
   indexed `family_id` column on `oauth_refresh_tokens`.
+- `2026_10_05_000001_add_scopes_to_oauth_clients_table` — a nullable `scopes`
+  column on `oauth_clients`; existing rows (NULL) stay unrestricted.
 
 ### Added
 
@@ -101,6 +103,12 @@ using the ORM stores:
   `authorization_guard`.
 - `OrmClientRepository` and the `auth:oauth2:client` command (`--public`,
   `--name`, repeatable `--redirect-uri`).
+- Per-client scope restrictions: `Client.scopes` lists the scopes a client may
+  request (empty means any). A request outside the list, including
+  `default_scopes` applied to a request naming none, fails with `invalid_scope`
+  on `/oauth/authorize`, the `client_credentials` grant and the password grant
+  when a client authenticates. `"*"` is an ordinary scope here, not a wildcard.
+  Set it with `auth:oauth2:client --scopes`; client repositories gain `revoke`.
 - `AuthMiddleware` and request-scoped facades: `Auth.user()`, `Session.token()`,
   `ApiToken.create(...)` work on the class inside a request. `Auth.validate`
   checks credentials without logging in.

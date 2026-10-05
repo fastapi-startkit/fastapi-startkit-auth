@@ -5,6 +5,7 @@ from cleo.helpers import option
 from fastapi_startkit.console import Command
 
 from ..concurrency import call
+from ..exceptions import InvalidScope
 
 
 def _valid_redirect(uri: str | None) -> bool:
@@ -23,6 +24,12 @@ class OAuth2ClientCommand(Command):
         option(
             "redirect-uri", description="Exact callback URI; repeat for multiple callbacks.", flag=False, multiple=True
         ),
+        option(
+            "scopes",
+            description="Scope the client may request; repeat or space-separate. Omit to allow any scope.",
+            flag=False,
+            multiple=True,
+        ),
     ]
 
     def handle(self) -> int:
@@ -32,6 +39,12 @@ class OAuth2ClientCommand(Command):
             self.line_error("A client name and absolute redirect URIs without fragments are required.")
             return 1
         manager = self.container.make("auth_manager")
+        scopes = list(dict.fromkeys(scope for value in self.option("scopes") for scope in value.split()))
+        try:
+            manager.grant_policy.check_scopes(scopes)
+        except InvalidScope as error:
+            self.line_error(str(error))
+            return 1
         client, secret = asyncio.run(
             call(
                 manager.client_repository.register,
@@ -39,6 +52,7 @@ class OAuth2ClientCommand(Command):
                 redirect_uris=redirects,
                 confidential=not self.option("public"),
                 grant_types=["authorization_code", "refresh_token"],
+                scopes=scopes,
             )
         )
         self.line(f"Client ID: {client.id}")
@@ -46,4 +60,5 @@ class OAuth2ClientCommand(Command):
             self.line(f"Client secret: {secret}")
             self.line("Save this secret now; it will not be shown again.")
         self.line("Authorization code with PKCE and refresh tokens enabled.")
+        self.line(f"Allowed scopes: {' '.join(scopes)}" if scopes else "Allowed scopes: any")
         return 0

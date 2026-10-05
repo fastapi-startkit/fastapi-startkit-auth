@@ -32,6 +32,7 @@ V06_MIGRATIONS = [
 NEW_MIGRATIONS = [
     "2026_10_04_000001_create_oauth_clients_table.py",
     "2026_10_04_000002_add_family_id_to_oauth_refresh_tokens_table.py",
+    "2026_10_05_000001_add_scopes_to_oauth_clients_table.py",
 ]
 
 

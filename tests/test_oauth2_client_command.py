@@ -106,3 +106,34 @@ def test_oauth_routes_use_database_clients_and_observe_deletion(client_database)
     denied = http.post("/oauth/token", data={"grant_type": "client_credentials"}, auth=(client.id, secret))
     assert denied.status_code == 401
     assert denied.headers["www-authenticate"] == "Basic"
+
+
+def test_scopes_option_restricts_the_client(client_database):
+    tester, manager = create_command()
+    command = "--public --name=Agent --redirect-uri=https://agent.example/cb --scopes='read write' --scopes=read"
+    assert tester.execute(command) == 0
+    client = asyncio.run(manager.client_repository.all())[0]
+    assert client.scopes == ["read", "write"]
+    assert "Allowed scopes: read write" in tester.io.fetch_output()
+
+
+def test_omitting_scopes_leaves_the_client_unrestricted(client_database):
+    tester, manager = create_command()
+    assert tester.execute("--public --name=Agent --redirect-uri=https://agent.example/cb") == 0
+    assert asyncio.run(manager.client_repository.all())[0].scopes == []
+    assert "Allowed scopes: any" in tester.io.fetch_output()
+
+
+def test_scopes_outside_the_catalog_create_no_client(client_database):
+    manager = AuthManager(Config).use_oauth2(
+        OAuth2Config(
+            key="command-test-key-with-at-least-32-bytes",
+            scopes={"read": "Read"},
+            clients=OAuthClientsConfig(store="database", connection=ORM_CONNECTION),
+        )
+    )
+    command = OAuth2ClientCommand()
+    command.set_container(SimpleNamespace(make=lambda name: manager))
+    tester = CommandTester(command)
+    assert tester.execute("--public --name=Agent --redirect-uri=https://agent.example/cb --scopes=admin") == 1
+    assert asyncio.run(manager.client_repository.all()) == []

@@ -26,6 +26,7 @@ class InMemoryClientRepository:
         confidential: bool = True,
         grant_types: list[str] | None = None,
         provider: str | None = None,
+        scopes: list[str] | None = None,
     ) -> tuple[Client, str | None]:
         client_id = uuid.uuid4().hex
         plain_secret: str | None = None
@@ -41,6 +42,7 @@ class InMemoryClientRepository:
             confidential=confidential,
             grant_types=list(grant_types or []),
             provider=provider,
+            scopes=list(scopes or []),
         )
         self._clients[client_id] = client
         return client, plain_secret
@@ -56,16 +58,24 @@ class InMemoryClientRepository:
         return list(self._clients.values())
 
     def authenticate(self, client_id: str, secret: str | None) -> Client | None:
+        return verified_client(self._hasher, self._clients.get(client_id), secret)
+
+    def revoke(self, client_id: str) -> bool:
         client = self._clients.get(client_id)
-        if client is None or client.revoked:
-            return None
-        if not client.confidential:
-            return client
-        if secret is None or client.secret is None:
-            return None
-        if self._hasher.verify(secret, client.secret):
-            return client
-        return None
+        if client is None:
+            return False
+        client.revoked = True
+        return True
 
     def delete(self, client_id: str) -> bool:
         return self._clients.pop(client_id, None) is not None
+
+
+def verified_client(hasher: Hasher, client: Client | None, secret: str | None) -> Client | None:
+    if client is None or client.revoked:
+        return None
+    if not client.confidential:
+        return client
+    if secret is None or client.secret is None:
+        return None
+    return client if hasher.verify(secret, client.secret) else None

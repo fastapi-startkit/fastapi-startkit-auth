@@ -39,6 +39,10 @@ class GrantPolicy:
         if unknown:
             raise InvalidScope(f"Unknown scope(s): {' '.join(unknown)}.")
 
+    def check_client_scopes(self, client: Client, scopes: list[str]) -> None:
+        if not client.allows_scopes(scopes):
+            raise InvalidScope("The client is not allowed to request these scopes.")
+
     def check_resource(self, resource: str | None) -> None:
         if resource is not None and resource not in self.resources:
             raise InvalidTarget("The requested resource is not served by this authorization server.")

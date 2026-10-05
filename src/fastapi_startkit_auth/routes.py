@@ -189,11 +189,14 @@ def build_router(prefix: str = "") -> APIRouter:
 
         if grant_type == "password":
             client = await _authenticate_client(manager, client_id, client_secret, "password") if client_id else None
+            scopes = manager.resolve_scopes(_scopes(scope))
+            if client is not None:
+                manager.grant_policy.check_client_scopes(client, scopes)
             issued = await call(
                 manager.password_grant(client=client).handle,
                 username=username or "",
                 password=password or "",
-                scopes=manager.resolve_scopes(_scopes(scope)),
+                scopes=scopes,
                 client_id=client_id,
             )
             return issued.to_response()
