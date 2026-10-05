@@ -91,6 +91,7 @@ using the ORM stores:
   revokes the whole family, whoever presents it: the owning client, another
   authenticated client, or no client at all for unbound password-grant tokens.
   Refresh tokens are introspectable.
+- `authentication.md`: the full authentication guide.
 - `POST /oauth/revoke` (RFC 7009) revokes the token and its access/refresh chain;
   `GET`/`DELETE /oauth/tokens` and `DELETE /oauth/tokens/{jti}` let a user list
   and revoke their OAuth tokens. `DELETE /oauth/personal-access-tokens` revokes
