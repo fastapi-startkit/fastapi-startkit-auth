@@ -7,6 +7,9 @@ to FastAPI: a config-driven guard/provider/passwords model layered on top of
 OAuth2 grants and signed JWT access tokens (per the
 [FastAPI security tutorial](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/)).
 
+The full guide — providers, sessions, API tokens, the OAuth 2.1 server, stores
+and migrations — is in [authentication.md](authentication.md).
+
 ## Features
 
 | Area | What you get |
@@ -63,7 +66,7 @@ from myapp.models import User  # any active-record-style model
 
 class Config(AuthConfig):
     default = {"guard": "api", "passwords": "users"}
-    guards = {"api": {"driver": "passport", "provider": "users"}}
+    guards = {"api": {"driver": "oauth2", "provider": "users"}}
     providers = {"users": {"driver": "masoniteorm", "model": User}}
     passwords = {
         "users": {"provider": "users", "table": "password_reset_tokens",
@@ -86,9 +89,25 @@ def reports(ctx=Depends(require_scopes("reports:read"))):
     return {"ok": True}
 ```
 
-In a Startkit application, list `AuthProvider` and then the feature providers
-(`AuthSessionProvider`, `AuthOAuth2Provider`, `AuthApiTokenProvider`) in the
-application's providers instead.
+`current_user`, `optional_user`, `auth` and `require_scopes` resolve the request
+through the default guard (`AuthConfig.default["guard"]`); use `Auth.user("name")`
+to read another guard.
+
+In a Startkit application, list `AuthProvider` and then the feature providers in
+the application's providers instead:
+
+```python
+from fastapi_startkit import Application
+
+app = Application(
+    providers=[
+        (AuthProvider, Config),
+        (AuthOAuth2Provider, OAuth2Config(key="change-me-to-a-long-random-secret")),
+    ]
+)
+```
+
+See [Registering the providers](authentication.md#registering-the-providers).
 
 ## Configuration
 
@@ -98,7 +117,7 @@ password brokers. Each feature has its own config, handed to its provider:
 | Provider | Config | Enables |
 | --- | --- | --- |
 | `AuthSessionProvider` | `SessionConfig` | cookie sessions (`"session"` guards), CSRF |
-| `AuthOAuth2Provider` | `OAuth2Config` | the OAuth 2.1 server (`"passport"` guards) |
+| `AuthOAuth2Provider` | `OAuth2Config` | the OAuth 2.1 server (`"oauth2"` guards; `"passport"` is an alias) |
 | `AuthApiTokenProvider` | `ApiTokenConfig` | opaque API tokens (`"token"` guards), SPA mode |
 
 ```python
@@ -114,6 +133,7 @@ OAuth2Config(
     default_scopes=[],
     pkce_methods=["S256"],
     require_pkce=True,
+    require_redirect_uri=True,
     grant_types=["authorization_code", "client_credentials", "refresh_token"],
     tokens=OAuthTokensConfig(store="memory"),
     clients=OAuthClientsConfig(store="database"),  # the default; needs the migrations
@@ -188,6 +208,10 @@ ApiTokenConfig(store="database")
 OAuth2Config(tokens=OAuthTokensConfig(store="database", connection="auth"))  # optional ORM connection name
 ```
 
+`"database"` is the persistent store for all four configs. Only
+`OAuthClientsConfig` uses it by default; `SessionConfig`, `ApiTokenConfig` and
+`OAuthTokensConfig` default to `"memory"`.
+
 `connection` names an entry of your database config; omit it to use the default
 connection. Publish and run the migrations once per app. Each provider
 publishes its own (all reversible and additive): sessions, personal API tokens,
@@ -196,8 +220,8 @@ and the OAuth access/refresh token, auth code and client tables plus the
 
 ```bash
 python artisan provider:publish -p auth-oauth2   # copies them to databases/migrations/
-python artisan migrate
-python artisan migrate:rollback           # drops them again
+python artisan db:migrate
+python artisan db:migrate:rollback        # drops them again
 ```
 
 Single-use guarantees rely on conditional `UPDATE`/`DELETE` statements issued
@@ -254,8 +278,11 @@ of 43–128 characters at exchange. A missing method means `plain`.
 
 Clients are created with `python artisan auth:oauth2:client --name app
 --redirect-uri https://app/cb [--public]` or
-`manager.client_repository.register(...)`. Refresh tokens are bound to their
-client; replaying a rotated refresh token revokes its whole family.
+`manager.client_repository.register(...)`; there are no `/oauth/clients` HTTP
+routes. Refresh tokens are bound to their client. Replaying a rotated refresh
+token through its own client (or, for an unbound password-grant token, without
+client credentials) revokes its whole family; see
+[Refresh tokens](authentication.md#refresh-tokens).
 
 ### Example: password grant
 
@@ -270,8 +297,8 @@ curl -X POST localhost:8000/oauth/token \
 
 ### Example: authorization code + PKCE
 
-1. `POST /oauth/authorize` with the user's credentials, `approved: true`, `code_challenge` and `code_challenge_method: S256` → returns a single-use `code` and `iss`.
-2. `POST /oauth/token` with `grant_type=authorization_code`, the `code`, and the `code_verifier`.
+1. `POST /oauth/authorize` as the signed-in user (resolved through `OAuth2Config.authorization_guard`, default: the default guard) with `client_id`, `redirect_uri`, `approved: true`, `code_challenge` and `code_challenge_method: S256` → returns a single-use `code` and `iss`.
+2. `POST /oauth/token` with `grant_type=authorization_code`, `client_id`, the `code`, `redirect_uri` and the `code_verifier` (plus the secret for a confidential client).
 
 ## Scopes / abilities
 

@@ -88,9 +88,11 @@ using the ORM stores:
 ### Added
 
 - Refresh token families with reuse detection: replaying a rotated refresh token
-  revokes the whole family, whoever presents it: the owning client, another
-  authenticated client, or no client at all for unbound password-grant tokens.
-  Refresh tokens are introspectable.
+  through the client it was issued to (or without client credentials, for an
+  unbound password-grant token) revokes the whole family. A replay through a
+  different client is rejected with `invalid_grant` but leaves the family
+  intact. Refresh tokens are introspectable.
+- `authentication.md`: the full authentication guide.
 - `POST /oauth/revoke` (RFC 7009) revokes the token and its access/refresh chain;
   `GET`/`DELETE /oauth/tokens` and `DELETE /oauth/tokens/{jti}` let a user list
   and revoke their OAuth tokens. `DELETE /oauth/personal-access-tokens` revokes
