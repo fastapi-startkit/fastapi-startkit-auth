@@ -14,6 +14,7 @@ from fastapi_startkit_auth import (
     SessionGuard,
     InMemoryApiTokenRepository,
     InMemorySessionStore,
+    OAuthClientsConfig,
     TokenGuard,
     TokenService,
     current_user,
@@ -21,6 +22,8 @@ from fastapi_startkit_auth import (
 )
 from fastapi_startkit_auth.dependencies import current_context
 from fastapi_startkit_auth.grants import (
+    AsyncAuthorizationCodeGrant,
+    AsyncRefreshTokenGrant,
     AuthorizationCodeGrant,
     ClientCredentialsGrant,
     PasswordGrant,
@@ -30,7 +33,7 @@ from fastapi_startkit_auth.providers.model import ModelUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
 
-from conftest import PASSWORD_GRANTS, BrowserTestClient, oauth2_config, register_auth
+from conftest import PASSWORD_GRANTS, BrowserTestClient, SyncClientRepository, auth_manager, oauth2_config, register_auth
 
 HASHER = BcryptHasher(rounds=4)
 
@@ -139,6 +142,23 @@ def test_manager_builds_the_sync_classes():
     assert type(manager.client_credentials_grant()) is ClientCredentialsGrant
     assert type(manager.authorization_code_grant()) is AuthorizationCodeGrant
     assert type(manager.broker()) is PasswordBroker
+
+
+def _manager_with_clients(clients):
+    return auth_manager(sync_config(), oauth2=oauth2_config(tokens={"store": "memory"}, clients=clients))
+
+
+def test_async_memory_client_store_selects_the_async_owner_grants():
+    manager = _manager_with_clients(OAuthClientsConfig(store="memory"))
+    assert type(manager.token_service) is TokenService
+    assert type(manager.refresh_grant()) is AsyncRefreshTokenGrant
+    assert type(manager.authorization_code_grant()) is AsyncAuthorizationCodeGrant
+
+
+def test_sync_instance_client_store_keeps_the_sync_owner_grants():
+    manager = _manager_with_clients(OAuthClientsConfig(store="instance", instance=SyncClientRepository()))
+    assert type(manager.refresh_grant()) is RefreshTokenGrant
+    assert type(manager.authorization_code_grant()) is AuthorizationCodeGrant
 
 
 def test_sync_grants_and_services_return_plain_values():

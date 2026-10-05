@@ -68,9 +68,11 @@ Each item lists what changed and what to do.
   table). *Migrate:* publish and run the migrations, or set
   `OAuth2Config(clients=OAuthClientsConfig(store="memory"))`.
 - **The in-memory OAuth client store is async.** `InMemoryClientRepository`
-  methods (`register`, `find`, `all`, `authenticate`, `revoke`, `delete`) are
-  coroutines, like `OrmClientRepository`, and `store="memory"` now makes the
-  manager build the async refresh and authorization-code grants. *Migrate:*
+  methods (`register`, `add`, `find`, `all`, `authenticate`, `revoke`,
+  `delete`) are coroutines, like `OrmClientRepository`, and `store="memory"` now
+  makes the manager build the async refresh and authorization-code grants. A
+  synchronous custom store passed with `store="instance"` keeps the sync grants.
+  *Migrate:*
   `await` client-store calls and the `handle` / `issue_code` of those grants.
 - **Persistent stores are named `"database"`.** `store="orm"` still works for
   sessions, API tokens, OAuth tokens and OAuth clients, but emits a

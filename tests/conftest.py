@@ -57,6 +57,8 @@ class SyncClientRepository:
 
     The shipped stores are async, which makes the manager pick the async grants;
     this double keeps the sync grant classes covered by the suite.
+    ``authenticate`` mirrors ``verified_client`` in clients/credentials.py, the
+    source of truth; keep the two in step.
     """
 
     def __init__(self, hasher=None):
