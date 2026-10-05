@@ -36,7 +36,8 @@ Each item lists what changed and what to do.
 - **Client-less refresh tokens need the password grant.** Refresh tokens are now
   bound to the issuing client: refreshing or revoking one requires that client's
   authentication. Tokens without a client (issued by the password grant) are only
-  accepted while `"password"` is enabled. *Migrate:* send client credentials on
+  accepted while `"password"` is enabled, and client credentials sent alongside
+  one are authenticated (`invalid_client` if wrong). *Migrate:* send client credentials on
   refresh; keep `"password"` enabled while old client-less tokens are in use.
 - **Consent is mandatory.** `POST /oauth/authorize` returns `access_denied`
   unless the body has `"approved": true`, and always returns `iss` (body and
@@ -87,8 +88,9 @@ using the ORM stores:
 ### Added
 
 - Refresh token families with reuse detection: replaying a rotated refresh token
-  revokes the whole family, including when another authenticated client
-  presents it. Refresh tokens are introspectable.
+  revokes the whole family, whoever presents it: the owning client, another
+  authenticated client, or no client at all for unbound password-grant tokens.
+  Refresh tokens are introspectable.
 - `POST /oauth/revoke` (RFC 7009) revokes the token and its access/refresh chain;
   `GET`/`DELETE /oauth/tokens` and `DELETE /oauth/tokens/{jti}` let a user list
   and revoke their OAuth tokens. `DELETE /oauth/personal-access-tokens` revokes

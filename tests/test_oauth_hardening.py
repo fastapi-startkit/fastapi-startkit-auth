@@ -161,6 +161,87 @@ def test_unbound_refresh_token_is_refused_when_a_client_presents_it():
     assert response.json()["error"] == "invalid_grant"
 
 
+def _rotated_unbound_pair(http):
+    """An unbound refresh token that has already been rotated, plus the live pair it rotated into."""
+    used = _unbound_refresh_token(http)
+    rotated = http.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": used})
+    assert rotated.status_code == 200, rotated.text
+    return used, rotated.json()
+
+
+def _assert_family_revoked(http, tokens):
+    with pytest.raises(InvalidToken):
+        http.app.state.auth_manager.token_service.authenticate(tokens["access_token"])
+    after = http.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]})
+    assert after.status_code == 400
+    assert after.json()["error"] == "invalid_grant"
+
+
+def test_replaying_a_used_unbound_refresh_token_revokes_its_family():
+    http, _ = make_auth_client()
+    used, tokens = _rotated_unbound_pair(http)
+
+    replay = http.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": used})
+    assert replay.status_code == 400
+    assert replay.json()["error"] == "invalid_grant"
+    _assert_family_revoked(http, tokens)
+
+
+def test_a_client_replaying_a_used_unbound_refresh_token_revokes_its_family():
+    http, _ = make_auth_client()
+    client = register_client(http, name="Service", grant_types=["client_credentials", "refresh_token"])
+    used, tokens = _rotated_unbound_pair(http)
+
+    replay = http.post(
+        "/oauth/token",
+        data={"grant_type": "refresh_token", "refresh_token": used},
+        auth=(client["id"], client["secret"]),
+    )
+    assert replay.status_code == 400
+    assert replay.json()["error"] == "invalid_grant"
+    _assert_family_revoked(http, tokens)
+
+
+def test_an_unknown_client_cannot_trigger_unbound_reuse_revocation():
+    http, _ = make_auth_client()
+    used, tokens = _rotated_unbound_pair(http)
+
+    replay = http.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": used}, auth=("unknown", "nope"))
+    assert replay.status_code == 401
+    assert replay.json()["error"] == "invalid_client"
+    assert http.app.state.auth_manager.token_service.authenticate(tokens["access_token"])["sub"] == "1"
+
+
+def test_a_client_presenting_an_unused_unbound_refresh_token_leaves_the_family_intact():
+    http, _ = make_auth_client()
+    client = register_client(http, name="Service", grant_types=["client_credentials", "refresh_token"])
+    service = http.app.state.auth_manager.token_service
+    issued = service.issue(user_id=1, client_id=None, scopes=[], with_refresh=True)
+
+    response = http.post(
+        "/oauth/token",
+        data={"grant_type": "refresh_token", "refresh_token": issued.refresh_token},
+        auth=(client["id"], client["secret"]),
+    )
+    assert response.status_code == 400
+    assert service.authenticate(issued.access_token)["sub"] == "1"
+
+
+async def test_async_replay_of_a_used_unbound_refresh_token_revokes_the_family(orm_database):
+    from fastapi_startkit_auth.tokens.orm import OrmTokenRepository
+
+    service = AsyncTokenService(encoder=JWTEncoder(secret=SECRET), repository=OrmTokenRepository(orm_database))
+    first = await service.issue(user_id=1, client_id=None, scopes=[], with_refresh=True)
+    second = await service.refresh(first.refresh_token)
+
+    with pytest.raises(InvalidGrant):
+        await service.refresh(first.refresh_token, client_id="c1")
+    with pytest.raises(InvalidGrant):
+        await service.refresh(second.refresh_token)
+    with pytest.raises(InvalidToken):
+        await service.authenticate(second.access_token)
+
+
 # --- chain revocation through /oauth/revoke ---------------------------------
 
 

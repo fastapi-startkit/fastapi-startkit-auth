@@ -226,9 +226,13 @@ def build_router(prefix: str = "") -> APIRouter:
                 # the grant below revokes its family before rejecting it.
                 if record.client_id != client_id and not record.revoked:
                     raise InvalidGrant("The refresh token was issued to a different client.")
-            elif client_id or not manager.grant_enabled("password"):
-                # Only the password grant issues client-less refresh tokens.
-                raise InvalidGrant("The refresh token is not bound to the requesting client.")
+            else:
+                if client_id:
+                    await _authenticate_client(manager, client_id, client_secret, "refresh_token")
+                # Only the password grant issues client-less refresh tokens; replaying a used one
+                # is reuse all the same, so it also reaches the grant and revokes its family.
+                if not record.revoked and (client_id or not manager.grant_enabled("password")):
+                    raise InvalidGrant("The refresh token is not bound to the requesting client.")
             requested = _scopes(scope)
             issued = await call(
                 manager.refresh_grant().handle,
