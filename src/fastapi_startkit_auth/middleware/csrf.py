@@ -9,7 +9,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from ..exceptions import CsrfTokenMismatch
+from ..exceptions import CsrfTokenMismatchException
 from ..sessions.state import FORGET_KEY, SESSION_KEY
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -132,7 +132,7 @@ class CsrfMiddleware:
 
     @staticmethod
     def _forbidden(description: str) -> Response:
-        error = CsrfTokenMismatch(description)
+        error = CsrfTokenMismatchException(description)
         return JSONResponse(status_code=error.status_code, content=error.to_dict())
 
     def _exempt(self, path: str) -> bool:

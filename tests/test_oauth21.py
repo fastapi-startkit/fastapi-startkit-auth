@@ -366,7 +366,7 @@ def test_malformed_basic_authentication_is_rejected(server, header):
 
 def test_concurrent_refresh_cannot_issue_two_valid_token_chains(server):
     from concurrent.futures import ThreadPoolExecutor
-    from fastapi_startkit_auth.exceptions import InvalidGrant
+    from fastapi_startkit_auth.exceptions import InvalidGrantException
 
     _, manager = server
     original = manager.token_service.issue(user_id=1, client_id="concurrent", scopes=["read"], with_refresh=True)
@@ -376,7 +376,7 @@ def test_concurrent_refresh_cannot_issue_two_valid_token_chains(server):
     errors = [attempt.exception() for attempt in attempts if attempt.exception() is not None]
     assert len(issued) == 1
     assert len(errors) == 1
-    assert isinstance(errors[0], InvalidGrant)
+    assert isinstance(errors[0], InvalidGrantException)
     assert manager.token_service.introspect(issued[0].access_token) == {"active": False}
 
 

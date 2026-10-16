@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .config import ApiTokenConfig, AuthConfig, OAuth2Config, SessionConfig
-from .exceptions import AuthError, InvalidClient
+from .exceptions import AuthException, InvalidClientException
 from .manager import AuthManager, FeatureNotRegistered
 from .middleware.context import AuthMiddleware
 from .routes import build_router
@@ -43,12 +43,12 @@ def _migrations(*names: str) -> dict[str, str]:
     return published
 
 
-async def _auth_error_handler(request: Request, exc: AuthError) -> JSONResponse:
+async def _auth_error_handler(request: Request, exc: AuthException) -> JSONResponse:
     # Error bodies can describe credentials or tokens, so no cache may keep them.
     headers = {"Cache-Control": "no-store", "Pragma": "no-cache"}
     if exc.status_code == 401:
         # RFC 6749 §5.2: a failed client authentication challenges with the client's scheme.
-        headers["WWW-Authenticate"] = "Basic" if isinstance(exc, InvalidClient) else "Bearer"
+        headers["WWW-Authenticate"] = "Basic" if isinstance(exc, InvalidClientException) else "Bearer"
     return JSONResponse(status_code=exc.status_code, content=exc.to_dict(), headers=headers)
 
 
@@ -161,7 +161,7 @@ class AuthProvider(_AuthFeatureProvider):
     def _install(self, app: FastAPI) -> None:
         manager = self._manager
         app.state.auth_manager = manager
-        app.add_exception_handler(AuthError, _auth_error_handler)
+        app.add_exception_handler(AuthException, _auth_error_handler)
         # Starlette builds the middleware stack on the first request, after every
         # feature provider has registered, so AuthMiddleware sees them all.
         app.add_middleware(AuthMiddleware, manager=manager)

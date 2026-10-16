@@ -4,7 +4,7 @@ import httpx
 import pytest
 from fastapi import Body, Depends, FastAPI
 
-from fastapi_startkit_auth import AsyncAuth, Auth, InvalidSession, Session
+from fastapi_startkit_auth import AsyncAuth, Auth, AuthenticationException, Session
 from fastapi_startkit_auth.dependencies import auth
 from fastapi_startkit_auth.request_context import current_auth_request
 
@@ -23,7 +23,7 @@ def facade_app():
     @api.post("/login")
     async def login(credentials: dict = Body(...)):
         if not await AsyncAuth.attempt(credentials):
-            raise InvalidSession("Invalid credentials.")
+            raise AuthenticationException("Invalid credentials.")
         previous = Session.id()
         await Session.regenerate()
         return {"previous": previous, "id": Session.id()}

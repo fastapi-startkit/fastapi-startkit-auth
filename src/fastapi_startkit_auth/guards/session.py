@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import Request
 
-from ..exceptions import InvalidSession
+from ..exceptions import AuthenticationException
 from ..concurrency import call, ensure_sync
 from ..providers.base import UserProvider, user_is_active, user_is_active_async
 from ..sessions.models import SessionRecord
@@ -33,14 +33,14 @@ class SessionGuard:
         """Resolve a raw session id (the cookie value) to an ``AuthContext``."""
         record = ensure_sync(self.store.find(access_token), "The session store's find")
         if record is None:
-            raise InvalidSession("Not authenticated.")
+            raise AuthenticationException("Not authenticated.")
         return self._context(record)
 
     def authenticate(self, request: Request) -> AuthContext:
         """Resolve the session attached to the request by the middleware."""
         record = getattr(request.state, SESSION_KEY, None)
         if record is None:
-            raise InvalidSession("Not authenticated.")
+            raise AuthenticationException("Not authenticated.")
         return self._context(record)
 
     def login(self, request: Request, user: Any) -> SessionRecord:
@@ -75,11 +75,11 @@ class SessionGuard:
         if record.user_id is None:
             # Guest session (issued by /__auth__/csrf-cookie): it carries a CSRF
             # token but no user, and must survive 401s so the SPA can log in.
-            raise InvalidSession("Not authenticated.")
+            raise AuthenticationException("Not authenticated.")
         user = ensure_sync(self.provider.retrieve_by_id(record.user_id), "The user provider's retrieve_by_id")
         if user is None or not user_is_active(self.provider, user):
             ensure_sync(self.store.invalidate(record.id), "The session store's invalidate")
-            raise InvalidSession("The session user no longer exists.")
+            raise AuthenticationException("The session user no longer exists.")
         return AuthContext(user=user, scopes=["*"])
 
 
@@ -93,13 +93,13 @@ class AsyncSessionGuard:
     async def user_from_token(self, access_token: str) -> AuthContext:
         record = await call(self.store.find, access_token)
         if record is None:
-            raise InvalidSession("Not authenticated.")
+            raise AuthenticationException("Not authenticated.")
         return await self._context(record)
 
     async def authenticate(self, request: Request) -> AuthContext:
         record = getattr(request.state, SESSION_KEY, None)
         if record is None:
-            raise InvalidSession("Not authenticated.")
+            raise AuthenticationException("Not authenticated.")
         return await self._context(record)
 
     async def login(self, request: Request, user: Any) -> SessionRecord:
@@ -125,11 +125,11 @@ class AsyncSessionGuard:
 
     async def _context(self, record: SessionRecord) -> AuthContext:
         if record.user_id is None:
-            raise InvalidSession("Not authenticated.")
+            raise AuthenticationException("Not authenticated.")
         user = await call(self.provider.retrieve_by_id, record.user_id)
         if user is None or not await user_is_active_async(self.provider, user):
             await call(self.store.invalidate, record.id)
-            raise InvalidSession("The session user no longer exists.")
+            raise AuthenticationException("The session user no longer exists.")
         return AuthContext(user=user, scopes=["*"])
 
 

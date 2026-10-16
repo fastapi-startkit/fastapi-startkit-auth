@@ -7,7 +7,7 @@ import pytest
 
 from fastapi_startkit_auth import AuthConfig, AuthManager
 from fastapi_startkit_auth.config import DEFAULT_GRANT_TYPES
-from fastapi_startkit_auth.exceptions import InvalidGrant, InvalidToken
+from fastapi_startkit_auth.exceptions import InvalidGrantException, InvalidTokenException
 from fastapi_startkit_auth.security.jwt import JWTEncoder
 from fastapi_startkit_auth.tokens.service import AsyncTokenService, TokenService
 
@@ -45,11 +45,11 @@ def test_replaying_a_rotated_refresh_token_revokes_every_descendant():
     second = service.refresh(first.refresh_token)
     third = service.refresh(second.refresh_token)
 
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         service.refresh(first.refresh_token)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         service.refresh(third.refresh_token)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         service.authenticate(third.access_token)
 
 
@@ -61,11 +61,11 @@ async def test_orm_replay_revokes_the_family(orm_database):
     second = await service.refresh(first.refresh_token)
     third = await service.refresh(second.refresh_token)
 
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await service.refresh(second.refresh_token)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await service.refresh(third.refresh_token)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         await service.authenticate(third.access_token)
 
 
@@ -88,7 +88,7 @@ def test_cross_client_replay_of_a_used_refresh_token_revokes_the_family():
     assert replay.status_code == 400
     assert replay.json()["error"] == "invalid_grant"
 
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         service.authenticate(tokens["access_token"])
     after = http.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}, auth=owner_auth)
     assert after.status_code == 400
@@ -117,11 +117,11 @@ async def test_async_cross_client_replay_revokes_the_family(orm_database):
     first = await service.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
     second = await service.refresh(first.refresh_token, client_id="c1")
 
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await service.refresh(first.refresh_token, client_id="c2")
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await service.refresh(second.refresh_token, client_id="c1")
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         await service.authenticate(second.access_token)
 
 
@@ -171,7 +171,7 @@ def _rotated_unbound_pair(http):
 
 
 def _assert_family_revoked(http, tokens):
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         http.app.state.auth_manager.token_service.authenticate(tokens["access_token"])
     after = http.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]})
     assert after.status_code == 400
@@ -235,11 +235,11 @@ async def test_async_replay_of_a_used_unbound_refresh_token_revokes_the_family(o
     first = await service.issue(user_id=1, client_id=None, scopes=[], with_refresh=True)
     second = await service.refresh(first.refresh_token)
 
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await service.refresh(first.refresh_token, client_id="c1")
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await service.refresh(second.refresh_token)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         await service.authenticate(second.access_token)
 
 
@@ -258,7 +258,7 @@ def test_revoking_an_access_token_revokes_its_refresh_chain():
 
     assert http.post("/oauth/revoke", data={"token": tokens["access_token"]}, auth=auth).status_code == 200
 
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         service.authenticate(tokens["access_token"])
     replay = http.post("/oauth/token", data={"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}, auth=auth)
     assert replay.status_code == 400
@@ -329,9 +329,9 @@ async def test_new_migrations_apply_on_top_of_a_v06_schema(orm_database, tmp_pat
 
     service = AsyncTokenService(encoder=JWTEncoder(secret=SECRET), repository=repository)
     rotated = await service.refresh(legacy)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await service.refresh(legacy)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await service.refresh(rotated.refresh_token)
 
     clients = OrmClientRepository(orm_database, hasher=BcryptHasher(rounds=4))

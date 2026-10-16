@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..concurrency import call
-from ..exceptions import InvalidGrant, InvalidToken
+from ..exceptions import InvalidGrantException, InvalidTokenException
 from ..policy import ensure_same_resource
 from ..security.jwt import JWTEncoder
 from .models import AccessTokenRecord, RefreshTokenRecord
@@ -66,14 +66,14 @@ def _refreshed_scopes(
     client_id: str | None,
 ) -> list[str]:
     if record is None or not record.active:
-        raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
+        raise InvalidGrantException("The refresh token is invalid, expired, or revoked.")
     if client_id is not None and record.client_id != client_id:
-        raise InvalidGrant("The refresh token was issued to a different client.")
+        raise InvalidGrantException("The refresh token was issued to a different client.")
     ensure_same_resource(record.resource, resource)
     if scopes is None:
         return list(record.scopes)
     if set(scopes) - set(record.scopes):
-        raise InvalidGrant("Requested scopes exceed those of the original grant.")
+        raise InvalidGrantException("Requested scopes exceed those of the original grant.")
     return list(scopes)
 
 
@@ -125,7 +125,7 @@ def _owned_by(record: AccessTokenRecord | None, user_id: Any, personal_access: b
 def _decoded_jti(encoder: JWTEncoder, token: str) -> str | None:
     try:
         return encoder.decode(token, verify_exp=False, verify_audience=False).get("jti")
-    except InvalidToken:
+    except InvalidTokenException:
         return None
 
 
@@ -239,7 +239,7 @@ class TokenService:
                 self.repository.consume_refresh_token(refresh_token)
             new_scopes = _refreshed_scopes(record, scopes, resource, client_id)
             if self.repository.consume_refresh_token(refresh_token) is None:
-                raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
+                raise InvalidGrantException("The refresh token is invalid, expired, or revoked.")
             self.repository.revoke_access_token(record.access_jti)
             return self.issue(
                 user_id=record.user_id,
@@ -256,7 +256,7 @@ class TokenService:
     def _active(self, claims: dict[str, Any]) -> dict[str, Any]:
         record = self.repository.find_access_token(claims.get("jti", ""))
         if record is None or not record.active:
-            raise InvalidToken("The access token has been revoked or is unknown.")
+            raise InvalidTokenException("The access token has been revoked or is unknown.")
         return claims
 
     def revoke_access(self, jti: str) -> bool:
@@ -296,7 +296,7 @@ class TokenService:
             return _refresh_introspection(refresh)
         try:
             claims = self._active(self.encoder.decode(token, verify_audience=False))
-        except InvalidToken:
+        except InvalidTokenException:
             return {"active": False}
         return _introspection(self.repository.find_access_token(claims["jti"]), claims)
 
@@ -412,7 +412,7 @@ class AsyncTokenService:
         if await call(self.repository.consume_refresh_token, refresh_token) is None:
             await call(self.repository.revoke_refresh_token, issued.refresh_token)
             await call(self.repository.revoke_access_token, issued.jti)
-            raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
+            raise InvalidGrantException("The refresh token is invalid, expired, or revoked.")
         await call(self.repository.revoke_access_token, record.access_jti)
         return issued
 
@@ -422,7 +422,7 @@ class AsyncTokenService:
     async def _active(self, claims: dict[str, Any]) -> dict[str, Any]:
         record = await call(self.repository.find_access_token, claims.get("jti", ""))
         if record is None or not record.active:
-            raise InvalidToken("The access token has been revoked or is unknown.")
+            raise InvalidTokenException("The access token has been revoked or is unknown.")
         return claims
 
     async def revoke_access(self, jti: str) -> bool:
@@ -464,6 +464,6 @@ class AsyncTokenService:
             return _refresh_introspection(refresh)
         try:
             claims = await self._active(self.encoder.decode(token, verify_audience=False))
-        except InvalidToken:
+        except InvalidTokenException:
             return {"active": False}
         return _introspection(await call(self.repository.find_access_token, claims["jti"]), claims)

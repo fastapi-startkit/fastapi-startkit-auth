@@ -6,7 +6,7 @@ from typing import Any
 
 from ..clients.models import Client
 from ..concurrency import call
-from ..exceptions import InvalidClient, InvalidGrant
+from ..exceptions import InvalidClientException, InvalidGrantException
 from ..policy import GrantPolicy, ensure_client_may, ensure_same_resource, ensure_valid_verifier
 from ..tokens.service import IssuedToken, TokenService
 from ..tokens.models import AuthorizationCode
@@ -41,20 +41,20 @@ def _validate_exchange(
 ) -> None:
     ensure_client_may(client, "authorization_code")
     if client.confidential and not client_authenticated:
-        raise InvalidClient("Confidential clients must authenticate to exchange a code.")
+        raise InvalidClientException("Confidential clients must authenticate to exchange a code.")
     if record is None or record.expired:
-        raise InvalidGrant("The authorization code is invalid or expired.")
+        raise InvalidGrantException("The authorization code is invalid or expired.")
     if record.client_id != client.id:
-        raise InvalidGrant("The authorization code was issued to a different client.")
+        raise InvalidGrantException("The authorization code was issued to a different client.")
     if record.redirect_uri != redirect_uri:
-        raise InvalidGrant("The redirect URI does not match the authorization request.")
+        raise InvalidGrantException("The redirect URI does not match the authorization request.")
     # PKCE is mandatory unless the client proved its identity with a secret.
     if not client_authenticated and not record.code_challenge:
-        raise InvalidGrant("PKCE is required: this code was not bound to a code_challenge.")
+        raise InvalidGrantException("PKCE is required: this code was not bound to a code_challenge.")
     if record.code_challenge:
         ensure_valid_verifier(code_verifier)
         if not verify_pkce(code_verifier, record.code_challenge, record.code_challenge_method):
-            raise InvalidGrant("PKCE verification failed.")
+            raise InvalidGrantException("PKCE verification failed.")
     ensure_same_resource(record.resource, resource)
 
 

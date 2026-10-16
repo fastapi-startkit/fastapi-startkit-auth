@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..concurrency import call
-from ..exceptions import InvalidToken
+from ..exceptions import InvalidTokenException
 from .models import ApiTokenRecord
 from .repository import ApiTokenRepository, generate_token_secret, hash_token_secret
 
@@ -29,7 +29,7 @@ def _check_secret(record: ApiTokenRecord | None, secret: str) -> None:
     expected = record.token_hash if record is not None else _DUMMY_HASH
     matched = secrets.compare_digest(hash_token_secret(secret), expected)
     if record is None or not matched or record.expired:
-        raise InvalidToken(_GENERIC_FAILURE)
+        raise InvalidTokenException(_GENERIC_FAILURE)
 
 
 def _creation_fields(

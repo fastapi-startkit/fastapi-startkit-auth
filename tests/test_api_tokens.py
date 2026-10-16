@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
     AuthConfig,
-    InvalidToken,
+    InvalidTokenException,
     current_user,
     optional_user,
     require_abilities,
@@ -195,32 +195,32 @@ def test_abilities_default_to_wildcard(tokens):
 
 def test_verify_rejects_wrong_secret(tokens):
     issued = tokens.create(user_id=1)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         tokens.verify(f"{issued.record.id}|wrong-secret")
 
 
 def test_verify_rejects_unknown_id(tokens):
     tokens.create(user_id=1)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         tokens.verify("unknown|some-secret")
 
 
 @pytest.mark.parametrize("malformed", ["", "|", "no-pipe", "id|", "|secret"])
 def test_verify_rejects_malformed_tokens(tokens, malformed):
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         tokens.verify(malformed)
 
 
 def test_verify_rejects_expired_tokens(tokens):
     issued = tokens.create(user_id=1, expires_at=time.time() - 1)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         tokens.verify(issued.plain_text)
 
 
 def test_verify_rejects_revoked_tokens(tokens):
     issued = tokens.create(user_id=1)
     assert tokens.revoke(issued.record.id) is True
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         tokens.verify(issued.plain_text)
 
 
@@ -235,7 +235,7 @@ def test_all_failures_share_one_generic_message(tokens):
     ]
     messages = set()
     for attempt in failures:
-        with pytest.raises(InvalidToken) as excinfo:
+        with pytest.raises(InvalidTokenException) as excinfo:
             tokens.verify(attempt)
         messages.add(str(excinfo.value))
     assert len(messages) == 1
@@ -262,7 +262,7 @@ def test_revoke_all_and_list(tokens):
     assert tokens.revoke_all(1) == 2
     assert tokens.tokens_for(1) == []
     tokens.verify(other.plain_text)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         tokens.verify(a.plain_text)
 
 
@@ -349,7 +349,7 @@ def test_missing_token_is_401(guard_client):
     client, _ = guard_client
     response = client.get("/me")
     assert response.status_code == 401
-    assert response.json()["error"] == "invalid_token"
+    assert response.json()["error"] == "invalid_session"
 
 
 def test_wrong_secret_is_a_generic_401(guard_client):
@@ -452,6 +452,6 @@ def test_orphaned_token_fails_generically_and_is_revoked(tokens):
     provider = seeded_provider()
     guard = TokenGuard(name="api", tokens=tokens, provider=provider)
     issued = tokens.create(user_id=999)  # no such user
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         guard.user_from_token(issued.plain_text)
     assert tokens.repository.find(issued.record.id) is None

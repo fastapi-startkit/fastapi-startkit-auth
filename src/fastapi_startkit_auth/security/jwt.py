@@ -6,7 +6,7 @@ from typing import Any
 
 import jwt
 
-from ..exceptions import InvalidToken
+from ..exceptions import InvalidTokenException
 
 
 class JWTEncoder:
@@ -62,4 +62,4 @@ class JWTEncoder:
                 options={"verify_exp": verify_exp, "verify_sub": False, "verify_aud": verify_audience},
             )
         except jwt.PyJWTError as exc:
-            raise InvalidToken(str(exc)) from exc
+            raise InvalidTokenException(str(exc)) from exc

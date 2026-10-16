@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from ..exceptions import InvalidToken
+from ..exceptions import InvalidTokenException
 from ..concurrency import call, ensure_sync
 from ..providers.base import UserProvider, find_user, find_user_async, user_is_active, user_is_active_async
 from ..tokens.service import TokenService
@@ -81,9 +81,9 @@ class PassportGuard:
             return None
         user = find_user(self.provider, sub)
         if user is None:
-            raise InvalidToken("The token subject no longer exists.")
+            raise InvalidTokenException("The token subject no longer exists.")
         if not user_is_active(self.provider, user):
-            raise InvalidToken(_INACTIVE_SUBJECT)
+            raise InvalidTokenException(_INACTIVE_SUBJECT)
         return user
 
 
@@ -112,7 +112,7 @@ class AsyncPassportGuard:
             return None
         user = await find_user_async(self.provider, sub)
         if user is None:
-            raise InvalidToken("The token subject no longer exists.")
+            raise InvalidTokenException("The token subject no longer exists.")
         if not await user_is_active_async(self.provider, user):
-            raise InvalidToken(_INACTIVE_SUBJECT)
+            raise InvalidTokenException(_INACTIVE_SUBJECT)
         return user

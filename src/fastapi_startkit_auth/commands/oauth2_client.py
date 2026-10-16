@@ -5,7 +5,7 @@ from cleo.helpers import option
 from fastapi_startkit.console import Command
 
 from ..concurrency import call
-from ..exceptions import InvalidScope
+from ..exceptions import InvalidScopeException
 
 
 def _valid_redirect(uri: str | None) -> bool:
@@ -45,7 +45,7 @@ class OAuth2ClientCommand(Command):
             return 1
         try:
             manager.grant_policy.check_scopes(scopes)
-        except InvalidScope as error:
+        except InvalidScopeException as error:
             self.line_error(str(error))
             return 1
         client, secret = asyncio.run(

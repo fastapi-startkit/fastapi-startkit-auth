@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..concurrency import call
-from ..exceptions import InvalidSession
+from ..exceptions import AuthenticationException
 from ..request_context import current_auth_request
 from .models import SessionRecord
 from .state import FORGET_KEY, PENDING_KEY, SESSION_KEY
@@ -31,7 +31,7 @@ class Session:
             return record
         record = await call(context.manager.session_guard(record.guard).store.regenerate_id, record.id)
         if record is None:
-            raise InvalidSession("The session has expired.")
+            raise AuthenticationException("The session has expired.")
         setattr(state, SESSION_KEY, record)
         setattr(state, FORGET_KEY, False)
         return record
