@@ -8,7 +8,7 @@ from fastapi_startkit_auth import (
     OAuth2Config,
     SessionConfig,
 )
-from fastapi_startkit_auth.config import OAuth2Guard, OAuthClientsConfig, SessionGuard, resolve_config
+from fastapi_startkit_auth.config import OAuth2Guard, OAuthClientConfig, SessionGuard, resolve_config
 from fastapi_startkit_auth.guards.guard import PassportGuard
 from fastapi_startkit_auth.guards.session import SessionGuard as RuntimeSessionGuard
 from fastapi_startkit_auth.security.jwt import JWTEncoder
@@ -112,7 +112,7 @@ def test_oauth_settings_configure_signing_and_token_lifetimes():
             key="nested-oauth-signing-key",
             access_token_ttl=120,
             authorization_code_ttl=30,
-            clients=OAuthClientsConfig(store="memory"),
+            clients=OAuthClientConfig(driver="memory"),
         )
     )
 
@@ -125,4 +125,4 @@ def test_oauth_settings_configure_signing_and_token_lifetimes():
 
 def test_missing_oauth_key_warns_and_generates_an_ephemeral_key():
     with pytest.warns(UserWarning, match="OAuth2Config.key is not set"):
-        AuthManager(Config).use_oauth2(OAuth2Config(clients=OAuthClientsConfig(store="memory")))
+        AuthManager(Config).use_oauth2(OAuth2Config(clients=OAuthClientConfig(driver="memory")))

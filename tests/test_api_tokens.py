@@ -431,12 +431,12 @@ def test_token_guard_coexists_with_passport_guard():
 
 def test_unknown_api_token_store_raises():
     with pytest.raises(ValueError, match="Unknown API token store"):
-        auth_manager(token_config(), api_tokens={"store": "redis"}).api_tokens
+        auth_manager(token_config(), api_tokens={"driver": "redis"}).api_tokens
 
 
 def test_instance_store_is_used_verbatim():
     repository = InMemoryApiTokenRepository()
-    manager = auth_manager(token_config(), api_tokens={"store": "instance", "instance": repository})
+    manager = auth_manager(token_config(), api_tokens={"driver": "instance", "instance": repository})
     assert manager.api_tokens.repository is repository
 
 

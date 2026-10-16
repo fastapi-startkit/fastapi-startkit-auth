@@ -132,7 +132,7 @@ def wire_routes(api):
 
 async def build(connection, **kwargs):
     api = FastAPI()
-    store = {"store": "database", "connection": connection}
+    store = {"driver": "database", "connection": connection}
     manager = register_auth(
         api,
         make_config(connection, **kwargs),
@@ -188,9 +188,9 @@ def test_removed_sql_stores_point_to_the_orm_store(section, removed):
         providers = {"users": {"driver": "memory", "users": []}}
 
     features = {
-        "session": {"session": {"store": removed}},
-        "api_tokens": {"api_tokens": {"store": removed}},
-        "tokens": {"oauth2": oauth2_config(tokens={"store": removed})},
+        "session": {"session": {"driver": removed}},
+        "api_tokens": {"api_tokens": {"driver": removed}},
+        "tokens": {"oauth2": oauth2_config(tokens={"driver": removed})},
     }[section]
     attribute = {"session": "session_store", "api_tokens": "api_tokens", "tokens": "token_repository"}[section]
     with pytest.raises(ValueError, match='"database"'):

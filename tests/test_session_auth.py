@@ -278,12 +278,12 @@ def test_manager_without_session_guard_adds_only_the_auth_middleware():
 def test_session_store_config_selects_implementation():
     assert isinstance(_manager().session_store, InMemorySessionStore)
     custom = InMemorySessionStore()
-    manager = _manager(session={"store": "instance", "instance": custom})
+    manager = _manager(session={"driver": "instance", "instance": custom})
     assert manager.session_store is custom
     with pytest.raises(ValueError, match="Unknown session store"):
-        _manager(session={"store": "redis"}).session_store
+        _manager(session={"driver": "redis"}).session_store
     with pytest.raises(ValueError, match='"database"'):
-        _manager(session={"store": "sql"}).session_store
+        _manager(session={"driver": "sql"}).session_store
 
 
 # --- facade unit behaviour --------------------------------------------
