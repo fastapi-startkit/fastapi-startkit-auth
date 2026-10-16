@@ -11,11 +11,6 @@ Release notes are also published on
 
 Each item lists what changed and what to do.
 
-- **Config `store` is now `driver`.** `SessionConfig`, `ApiTokenConfig`, `OAuthTokenConfig` and `OAuthClientConfig` take `driver=` instead of `store=`, and the dict form uses the `"driver"` key. The values (`"memory"`, `"database"`, `"instance"`) are unchanged. *Migrate:* rename `store=` to `driver=` in configs and `"store"` to `"driver"` in dicts.
-- **OAuth config classes are singular.** `OAuthTokensConfig` is now
-  `OAuthTokenConfig` and `OAuthClientsConfig` is now `OAuthClientConfig`. The
-  plural names still import and work but emit a `DeprecationWarning`. Field
-  names (`tokens`, `clients`) are unchanged. *Migrate:* rename the classes.
 - **Feature providers replace `Application` and `AuthServiceProvider`.**
   Register `AuthProvider` first, then the features your guards use:
   `AuthSessionProvider(SessionConfig)`, `AuthOAuth2Provider(OAuth2Config)` and
