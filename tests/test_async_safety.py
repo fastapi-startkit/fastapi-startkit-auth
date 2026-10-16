@@ -98,7 +98,7 @@ def make_config(*, default_guard="api", provider=None):
 
 
 def install(api, connection=None, *, session=None, clients=None, **kwargs):
-    stores = {"store": "database", "connection": connection} if connection is not None else {"store": "memory"}
+    stores = {"driver": "database", "connection": connection} if connection is not None else {"driver": "memory"}
     return register_auth(
         api,
         make_config(**kwargs),
@@ -307,7 +307,7 @@ def test_sync_refresh_grant_denied_when_owner_is_gone(how):
     users = [{"id": 1, "email": "ada@example.com", "password": HASHER.make("secret"), "active": True}]
     provider = {"driver": "memory", "users": users, "is_active": "active"}
     api = FastAPI()
-    sync_clients = {"store": "instance", "instance": SyncClientRepository()}
+    sync_clients = {"driver": "instance", "instance": SyncClientRepository()}
     manager = install(api, provider=provider, clients=sync_clients)
     assert isinstance(manager.refresh_grant(), RefreshTokenGrant)
     client = TestClient(api)
@@ -385,7 +385,7 @@ async def test_sync_provider_and_session_store_never_run_on_the_loop(orm_databas
     client, _ = await build(
         orm_database,
         provider={"driver": "instance", "instance": provider},
-        session={"store": "instance", "instance": sessions},
+        session={"driver": "instance", "instance": sessions},
     )
     async with client:
         LOOP_CALLS.clear()

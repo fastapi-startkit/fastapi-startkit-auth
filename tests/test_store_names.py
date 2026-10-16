@@ -20,7 +20,7 @@ class Config(AuthConfig):
 
 
 def test_oauth_clients_default_to_the_database_store():
-    assert OAuthClientConfig().store == "database"
+    assert OAuthClientConfig().driver == "database"
 
 
 def test_the_database_default_resolves_to_the_orm_client_store():
@@ -35,9 +35,9 @@ def test_the_database_default_resolves_to_the_orm_client_store():
 
 @pytest.mark.parametrize("config_type", STORE_CONFIGS)
 def test_orm_is_a_deprecated_alias_of_database(config_type):
-    with pytest.warns(DeprecationWarning, match=f'{config_type.__name__}\\(store="orm"\\) is deprecated'):
-        config = config_type(store="orm")
-    assert config.store == "database"
+    with pytest.warns(DeprecationWarning, match=f'{config_type.__name__}\\(driver="orm"\\) is deprecated'):
+        config = config_type(driver="orm")
+    assert config.driver == "database"
 
 
 def test_the_deprecated_alias_still_resolves_to_the_orm_client_store():
@@ -45,5 +45,5 @@ def test_the_deprecated_alias_still_resolves_to_the_orm_client_store():
     from fastapi_startkit_auth.clients.orm import OrmClientRepository
 
     with pytest.warns(DeprecationWarning):
-        manager = AuthManager(Config).use_oauth2(oauth2_config(clients={"store": "orm"}))
+        manager = AuthManager(Config).use_oauth2(oauth2_config(clients={"driver": "orm"}))
     assert isinstance(manager.client_repository, OrmClientRepository)

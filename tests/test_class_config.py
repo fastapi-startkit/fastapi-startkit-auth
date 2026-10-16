@@ -112,7 +112,7 @@ def test_oauth_settings_configure_signing_and_token_lifetimes():
             key="nested-oauth-signing-key",
             access_token_ttl=120,
             authorization_code_ttl=30,
-            clients=OAuthClientConfig(store="memory"),
+            clients=OAuthClientConfig(driver="memory"),
         )
     )
 
@@ -125,4 +125,4 @@ def test_oauth_settings_configure_signing_and_token_lifetimes():
 
 def test_missing_oauth_key_warns_and_generates_an_ephemeral_key():
     with pytest.warns(UserWarning, match="OAuth2Config.key is not set"):
-        AuthManager(Config).use_oauth2(OAuth2Config(clients=OAuthClientConfig(store="memory")))
+        AuthManager(Config).use_oauth2(OAuth2Config(clients=OAuthClientConfig(driver="memory")))

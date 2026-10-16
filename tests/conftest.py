@@ -113,7 +113,7 @@ class SyncClientRepository:
 
 def oauth2_config(**overrides):
     overrides.setdefault("key", TEST_OAUTH_KEY)
-    overrides.setdefault("clients", OAuthClientConfig(store="instance", instance=SyncClientRepository()))
+    overrides.setdefault("clients", OAuthClientConfig(driver="instance", instance=SyncClientRepository()))
     return OAuth2Config(**overrides)
 
 

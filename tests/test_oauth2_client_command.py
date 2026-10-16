@@ -41,7 +41,7 @@ def client_database(tmp_path):
 
 OAUTH2 = OAuth2Config(
     key="command-test-key-with-at-least-32-bytes",
-    clients=OAuthClientConfig(store="database", connection=ORM_CONNECTION),
+    clients=OAuthClientConfig(driver="database", connection=ORM_CONNECTION),
 )
 
 
@@ -136,7 +136,7 @@ def test_scopes_outside_the_catalog_create_no_client(client_database):
         OAuth2Config(
             key="command-test-key-with-at-least-32-bytes",
             scopes={"read": "Read"},
-            clients=OAuthClientConfig(store="database", connection=ORM_CONNECTION),
+            clients=OAuthClientConfig(driver="database", connection=ORM_CONNECTION),
         )
     )
     command = OAuth2ClientCommand()

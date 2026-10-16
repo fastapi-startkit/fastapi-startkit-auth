@@ -8,14 +8,14 @@ from typing import Any, Literal, TypeVar
 ConfigT = TypeVar("ConfigT")
 
 
-def _canonical_store(store: str, section: str) -> str:
-    if store == "orm":
+def _canonical_driver(driver: str, section: str) -> str:
+    if driver == "orm":
         # stacklevel 4: this helper, __post_init__, the dataclass __init__, then the caller.
         warnings.warn(
-            f'{section}(store="orm") is deprecated; use store="database".', DeprecationWarning, stacklevel=4
+            f'{section}(driver="orm") is deprecated; use driver="database".', DeprecationWarning, stacklevel=4
         )
         return "database"
-    return store
+    return driver
 
 
 @dataclass
@@ -41,11 +41,11 @@ class ApiTokenGuard:
 class SessionConfig:
     """Cookie sessions, enabled by ``AuthSessionProvider``.
 
-    ``store`` is "memory", "database" (the ORM ``sessions`` table; "orm" is a
+    ``driver`` is "memory", "database" (the ORM ``sessions`` table; "orm" is a
     deprecated alias) or "instance" (a ready-made store under ``instance``).
     """
 
-    store: str = "memory"
+    driver: str = "memory"
     connection: str | None = None
     instance: Any = None
     cookie: str = "startkit_session"
@@ -63,7 +63,7 @@ class SessionConfig:
     csrf_exempt_paths: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.store = _canonical_store(self.store, "SessionConfig")
+        self.driver = _canonical_driver(self.driver, "SessionConfig")
 
 
 @dataclass
@@ -74,7 +74,7 @@ class ApiTokenConfig:
     accept the ``session_guard`` cookie session from those origins.
     """
 
-    store: str = "memory"
+    driver: str = "memory"
     connection: str | None = None
     instance: Any = None
     header: str = "Authorization"
@@ -84,7 +84,7 @@ class ApiTokenConfig:
     session_guard: str = "web"
 
     def __post_init__(self) -> None:
-        self.store = _canonical_store(self.store, "ApiTokenConfig")
+        self.driver = _canonical_driver(self.driver, "ApiTokenConfig")
 
     @property
     def stateful(self) -> bool:
@@ -95,22 +95,22 @@ class ApiTokenConfig:
 class OAuthClientConfig:
     """Where OAuth clients live: "database" (the ORM ``oauth_clients`` table), "memory" or "instance"."""
 
-    store: str = "database"
+    driver: str = "database"
     connection: str | None = None
     instance: Any = None
 
     def __post_init__(self) -> None:
-        self.store = _canonical_store(self.store, "OAuthClientConfig")
+        self.driver = _canonical_driver(self.driver, "OAuthClientConfig")
 
 
 @dataclass
 class OAuthTokenConfig:
-    store: str = "memory"
+    driver: str = "memory"
     connection: str | None = None
     instance: Any = None
 
     def __post_init__(self) -> None:
-        self.store = _canonical_store(self.store, "OAuthTokenConfig")
+        self.driver = _canonical_driver(self.driver, "OAuthTokenConfig")
 
 
 def _deprecated_alias(config_type: type[ConfigT], old_name: str) -> type[ConfigT]:

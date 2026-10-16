@@ -368,7 +368,7 @@ def test_deprecated_key_is_still_honoured():
         key = TEST_OAUTH_KEY
 
     with pytest.warns(DeprecationWarning, match="AuthConfig.key"):
-        manager = AuthManager(KeyConfig).use_oauth2({"clients": {"store": "memory"}})
+        manager = AuthManager(KeyConfig).use_oauth2({"clients": {"driver": "memory"}})
     assert manager.oauth2_config.key == TEST_OAUTH_KEY
 
 

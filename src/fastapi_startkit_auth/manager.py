@@ -52,10 +52,10 @@ SESSION_GUARDS = (SessionGuard, AsyncSessionGuard)
 _REMOVED_STORES = ("sql", "async_sql")
 
 
-def _reject_removed_store(kind: str, section: str) -> None:
+def _reject_removed_driver(kind: str, section: str) -> None:
     if kind in _REMOVED_STORES:
         raise ValueError(
-            f'{section} store "{kind}" was removed: use store "database" (optional ORM '
+            f'{section} store "{kind}" was removed: use driver "database" (optional ORM '
             '"connection" name) after running the published migrations.'
         )
 
@@ -330,16 +330,16 @@ class AuthManager:
 
     def _build_session_store(self) -> SessionStore:
         config = self.session_config
-        if config.store == "memory":
+        if config.driver == "memory":
             return InMemorySessionStore(idle_ttl=config.idle_ttl)
-        if config.store == "database":
+        if config.driver == "database":
             from .sessions.orm import OrmSessionStore
 
             return OrmSessionStore(config.connection, idle_ttl=config.idle_ttl, purge_interval=config.purge_interval)
-        _reject_removed_store(config.store, "SessionConfig")
-        if config.store == "instance":
+        _reject_removed_driver(config.driver, "SessionConfig")
+        if config.driver == "instance":
             return config.instance
-        raise ValueError(f"Unknown session store: {config.store!r}")
+        raise ValueError(f"Unknown session store: {config.driver!r}")
 
     @property
     def api_tokens(self) -> ApiTokenManager | AsyncApiTokenManager:
@@ -353,41 +353,41 @@ class AuthManager:
         return self._api_tokens
 
     def _build_api_token_repository(self, config: ApiTokenConfig) -> ApiTokenRepository:
-        if config.store == "memory":
+        if config.driver == "memory":
             return InMemoryApiTokenRepository()
-        if config.store == "database":
+        if config.driver == "database":
             from .apitokens.orm import OrmApiTokenRepository
 
             return OrmApiTokenRepository(config.connection)
-        _reject_removed_store(config.store, "ApiTokenConfig")
-        if config.store == "instance":
+        _reject_removed_driver(config.driver, "ApiTokenConfig")
+        if config.driver == "instance":
             return config.instance
-        raise ValueError(f"Unknown API token store: {config.store!r}")
+        raise ValueError(f"Unknown API token store: {config.driver!r}")
 
     def _build_token_repository(self, config: OAuth2Config) -> Any:
         tokens = config.tokens
-        if tokens.store == "memory":
+        if tokens.driver == "memory":
             return InMemoryTokenRepository()
-        if tokens.store == "database":
+        if tokens.driver == "database":
             from .tokens.orm import OrmTokenRepository
 
             return OrmTokenRepository(tokens.connection)
-        _reject_removed_store(tokens.store, "OAuth2Config.tokens")
-        if tokens.store == "instance":
+        _reject_removed_driver(tokens.driver, "OAuth2Config.tokens")
+        if tokens.driver == "instance":
             return tokens.instance
-        raise ValueError(f"Unknown OAuth token store: {tokens.store!r}")
+        raise ValueError(f"Unknown OAuth token store: {tokens.driver!r}")
 
     def _build_client_repository(self, config: OAuth2Config) -> Any:
         clients = config.clients
-        if clients.store == "memory":
+        if clients.driver == "memory":
             return InMemoryClientRepository(hasher=self.hasher)
-        if clients.store == "database":
+        if clients.driver == "database":
             from .clients.orm import OrmClientRepository
 
             return OrmClientRepository(clients.connection, hasher=self.hasher)
-        if clients.store == "instance":
+        if clients.driver == "instance":
             return clients.instance
-        raise ValueError(f"Unknown OAuth client store: {clients.store!r}")
+        raise ValueError(f"Unknown OAuth client store: {clients.driver!r}")
 
     # --- providers and brokers -----------------------------------------
     def _build_provider(self, spec: dict[str, Any]) -> UserProvider:

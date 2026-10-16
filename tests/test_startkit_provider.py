@@ -28,7 +28,7 @@ PUBLISHABLE = Path(__file__).resolve().parents[1] / "src" / "fastapi_startkit_au
 CORS_STUB = PUBLISHABLE / "cors.py"
 MIGRATIONS = PUBLISHABLE / "migrations"
 SECRET = "framework-test-secret-with-32-bytes-min!"
-MEMORY_CLIENTS = {"store": "memory"}
+MEMORY_CLIENTS = {"driver": "memory"}
 
 
 class FakeConfig:
@@ -185,7 +185,7 @@ class Config(AuthConfig):
 
 app = FastAPI()
 AuthProvider(Config).register(app)
-AuthOAuth2Provider(OAuth2Config(key="standalone-test-key-with-32-bytes-min!", clients=OAuthClientConfig(store="memory"))).register(app)
+AuthOAuth2Provider(OAuth2Config(key="standalone-test-key-with-32-bytes-min!", clients=OAuthClientConfig(driver="memory"))).register(app)
 assert TestClient(app).post("/oauth/token", data={"grant_type": "unsupported"}).status_code == 400
 assert "fastapi_startkit" not in sys.modules
 """

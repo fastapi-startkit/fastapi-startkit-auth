@@ -99,7 +99,7 @@ def build(default_guard="api", sent=None):
         api,
         sync_config(default_guard, sent),
         session={},
-        oauth2=oauth2_config(grant_types=list(PASSWORD_GRANTS), tokens={"store": "memory"}),
+        oauth2=oauth2_config(grant_types=list(PASSWORD_GRANTS), tokens={"driver": "memory"}),
         api_tokens={},
     )
 
@@ -145,18 +145,18 @@ def test_manager_builds_the_sync_classes():
 
 
 def _manager_with_clients(clients):
-    return auth_manager(sync_config(), oauth2=oauth2_config(tokens={"store": "memory"}, clients=clients))
+    return auth_manager(sync_config(), oauth2=oauth2_config(tokens={"driver": "memory"}, clients=clients))
 
 
 def test_async_memory_client_store_selects_the_async_owner_grants():
-    manager = _manager_with_clients(OAuthClientConfig(store="memory"))
+    manager = _manager_with_clients(OAuthClientConfig(driver="memory"))
     assert type(manager.token_service) is TokenService
     assert type(manager.refresh_grant()) is AsyncRefreshTokenGrant
     assert type(manager.authorization_code_grant()) is AsyncAuthorizationCodeGrant
 
 
 def test_sync_instance_client_store_keeps_the_sync_owner_grants():
-    manager = _manager_with_clients(OAuthClientConfig(store="instance", instance=SyncClientRepository()))
+    manager = _manager_with_clients(OAuthClientConfig(driver="instance", instance=SyncClientRepository()))
     assert type(manager.refresh_grant()) is RefreshTokenGrant
     assert type(manager.authorization_code_grant()) is AuthorizationCodeGrant
 
