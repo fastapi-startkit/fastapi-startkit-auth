@@ -92,7 +92,7 @@ class ApiTokenConfig:
 
 
 @dataclass
-class OAuthClientsConfig:
+class OAuthClientConfig:
     """Where OAuth clients live: "database" (the ORM ``oauth_clients`` table), "memory" or "instance"."""
 
     store: str = "database"
@@ -100,17 +100,34 @@ class OAuthClientsConfig:
     instance: Any = None
 
     def __post_init__(self) -> None:
-        self.store = _canonical_store(self.store, "OAuthClientsConfig")
+        self.store = _canonical_store(self.store, "OAuthClientConfig")
 
 
 @dataclass
-class OAuthTokensConfig:
+class OAuthTokenConfig:
     store: str = "memory"
     connection: str | None = None
     instance: Any = None
 
     def __post_init__(self) -> None:
-        self.store = _canonical_store(self.store, "OAuthTokensConfig")
+        self.store = _canonical_store(self.store, "OAuthTokenConfig")
+
+
+def _deprecated_alias(config_type: type[ConfigT], old_name: str) -> type[ConfigT]:
+    class Alias(config_type):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            warnings.warn(
+                f"{old_name} is deprecated; use {config_type.__name__}.", DeprecationWarning, stacklevel=2
+            )
+            super().__init__(*args, **kwargs)
+
+    Alias.__name__ = old_name
+    Alias.__qualname__ = old_name
+    return Alias
+
+
+OAuthClientsConfig = _deprecated_alias(OAuthClientConfig, "OAuthClientsConfig")
+OAuthTokensConfig = _deprecated_alias(OAuthTokenConfig, "OAuthTokensConfig")
 
 
 DEFAULT_GRANT_TYPES = ("authorization_code", "client_credentials", "refresh_token")
@@ -145,12 +162,12 @@ class OAuth2Config:
     require_redirect_uri: bool = True
     grant_types: list[str] = field(default_factory=lambda: list(DEFAULT_GRANT_TYPES))
     authorization_guard: str | None = None
-    tokens: OAuthTokensConfig = field(default_factory=OAuthTokensConfig)
-    clients: OAuthClientsConfig = field(default_factory=OAuthClientsConfig)
+    tokens: OAuthTokenConfig = field(default_factory=OAuthTokenConfig)
+    clients: OAuthClientConfig = field(default_factory=OAuthClientConfig)
 
     def __post_init__(self) -> None:
-        self.tokens = resolve_config(self.tokens, OAuthTokensConfig)
-        self.clients = resolve_config(self.clients, OAuthClientsConfig)
+        self.tokens = resolve_config(self.tokens, OAuthTokenConfig)
+        self.clients = resolve_config(self.clients, OAuthClientConfig)
 
 
 # v0.6 AuthConfig attributes that moved to OAuth2Config; still read, with a warning.

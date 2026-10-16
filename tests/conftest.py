@@ -27,7 +27,7 @@ from fastapi_startkit_auth import (
     AuthProvider,
     AuthSessionProvider,
     OAuth2Config,
-    OAuthClientsConfig,
+    OAuthClientConfig,
     current_user,
     require_scopes,
 )
@@ -113,7 +113,7 @@ class SyncClientRepository:
 
 def oauth2_config(**overrides):
     overrides.setdefault("key", TEST_OAUTH_KEY)
-    overrides.setdefault("clients", OAuthClientsConfig(store="instance", instance=SyncClientRepository()))
+    overrides.setdefault("clients", OAuthClientConfig(store="instance", instance=SyncClientRepository()))
     return OAuth2Config(**overrides)
 
 

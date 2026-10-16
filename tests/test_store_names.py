@@ -5,14 +5,14 @@ import pytest
 from fastapi_startkit_auth import AuthConfig, AuthManager
 from fastapi_startkit_auth.config import (
     ApiTokenConfig,
-    OAuthClientsConfig,
-    OAuthTokensConfig,
+    OAuthClientConfig,
+    OAuthTokenConfig,
     SessionConfig,
 )
 
 from conftest import oauth2_config
 
-STORE_CONFIGS = [SessionConfig, ApiTokenConfig, OAuthClientsConfig, OAuthTokensConfig]
+STORE_CONFIGS = [SessionConfig, ApiTokenConfig, OAuthClientConfig, OAuthTokenConfig]
 
 
 class Config(AuthConfig):
@@ -20,7 +20,7 @@ class Config(AuthConfig):
 
 
 def test_oauth_clients_default_to_the_database_store():
-    assert OAuthClientsConfig().store == "database"
+    assert OAuthClientConfig().store == "database"
 
 
 def test_the_database_default_resolves_to_the_orm_client_store():
@@ -29,7 +29,7 @@ def test_the_database_default_resolves_to_the_orm_client_store():
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
-        manager = AuthManager(Config).use_oauth2(oauth2_config(clients=OAuthClientsConfig()))
+        manager = AuthManager(Config).use_oauth2(oauth2_config(clients=OAuthClientConfig()))
     assert isinstance(manager.client_repository, OrmClientRepository)
 
 

@@ -178,14 +178,14 @@ sys.meta_path.insert(0, BlockStartkit())
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from fastapi_startkit_auth import AuthConfig, AuthOAuth2Provider, AuthProvider, OAuth2Config, OAuthClientsConfig
+from fastapi_startkit_auth import AuthConfig, AuthOAuth2Provider, AuthProvider, OAuth2Config, OAuthClientConfig
 
 class Config(AuthConfig):
     guards = {}
 
 app = FastAPI()
 AuthProvider(Config).register(app)
-AuthOAuth2Provider(OAuth2Config(key="standalone-test-key-with-32-bytes-min!", clients=OAuthClientsConfig(store="memory"))).register(app)
+AuthOAuth2Provider(OAuth2Config(key="standalone-test-key-with-32-bytes-min!", clients=OAuthClientConfig(store="memory"))).register(app)
 assert TestClient(app).post("/oauth/token", data={"grant_type": "unsupported"}).status_code == 400
 assert "fastapi_startkit" not in sys.modules
 """

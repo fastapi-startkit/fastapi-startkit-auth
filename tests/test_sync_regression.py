@@ -14,7 +14,7 @@ from fastapi_startkit_auth import (
     SessionGuard,
     InMemoryApiTokenRepository,
     InMemorySessionStore,
-    OAuthClientsConfig,
+    OAuthClientConfig,
     TokenGuard,
     TokenService,
     current_user,
@@ -149,14 +149,14 @@ def _manager_with_clients(clients):
 
 
 def test_async_memory_client_store_selects_the_async_owner_grants():
-    manager = _manager_with_clients(OAuthClientsConfig(store="memory"))
+    manager = _manager_with_clients(OAuthClientConfig(store="memory"))
     assert type(manager.token_service) is TokenService
     assert type(manager.refresh_grant()) is AsyncRefreshTokenGrant
     assert type(manager.authorization_code_grant()) is AsyncAuthorizationCodeGrant
 
 
 def test_sync_instance_client_store_keeps_the_sync_owner_grants():
-    manager = _manager_with_clients(OAuthClientsConfig(store="instance", instance=SyncClientRepository()))
+    manager = _manager_with_clients(OAuthClientConfig(store="instance", instance=SyncClientRepository()))
     assert type(manager.refresh_grant()) is RefreshTokenGrant
     assert type(manager.authorization_code_grant()) is AuthorizationCodeGrant
 
