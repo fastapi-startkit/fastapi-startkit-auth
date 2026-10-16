@@ -6,7 +6,7 @@ from fastapi import Depends, Request
 
 from .dependencies import _bearer_token, get_auth_manager, resolve_context
 from .concurrency import call, ensure_sync
-from .exceptions import AuthError
+from .exceptions import AuthException
 from .guards.session import AsyncSessionGuard, SessionGuard
 from .manager import AuthManager
 from .providers.base import user_is_active, user_is_active_async
@@ -26,7 +26,7 @@ class Auth:
         @api.post("/login")
         def login(payload: Credentials, auth: Auth = Depends(Auth.scoped)):
             if not auth.attempt(payload.model_dump()):
-                raise InvalidSession("Invalid credentials.")
+                raise AuthenticationException("Invalid credentials.")
             return {"ok": True}
 
         @api.post("/logout")
@@ -97,7 +97,7 @@ class Auth:
             if token is None:
                 return None
             return ensure_sync(resolved.user_from_token(token), "The guard's user_from_token").user
-        except AuthError:
+        except AuthException:
             return None
 
     @ScopedMethod
@@ -174,7 +174,7 @@ class AsyncAuth:
     async def user(self, guard: str | None = None) -> Any | None:
         try:
             return (await resolve_context(self._request, self._manager, guard)).user
-        except AuthError:
+        except AuthException:
             return None
 
     @ScopedMethod

@@ -11,7 +11,7 @@ from fastapi_startkit_auth import (
     AsyncTokenService,
     Auth,
     AuthConfig,
-    InvalidSession,
+    AuthenticationException,
     current_user,
     optional_user,
 )
@@ -108,7 +108,7 @@ def wire_routes(api):
     @api.post("/login")
     async def login(payload: dict = Body(...), auth: AsyncAuth = Depends(AsyncAuth.scoped)):
         if not await auth.attempt(payload):
-            raise InvalidSession("Invalid credentials.")
+            raise AuthenticationException("Invalid credentials.")
         return {"ok": True}
 
     @api.post("/login-as/{user_id}")

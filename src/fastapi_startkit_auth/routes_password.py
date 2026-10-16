@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from .concurrency import call
 from .dependencies import get_auth_manager
-from .exceptions import InvalidGrant, ThrottleException
+from .exceptions import InvalidGrantException, ThrottleException
 from .manager import AuthManager
 
 GENERIC_RESET_RESPONSE = {"status": "If that account exists, a reset link has been sent."}
@@ -36,7 +36,7 @@ def build_password_router(prefix: str = "") -> APIRouter:
         # endpoint cannot enumerate accounts; the token travels out-of-band.
         try:
             token = await call(manager.broker().send_reset_link, body.email)
-        except (InvalidGrant, ThrottleException):
+        except (InvalidGrantException, ThrottleException):
             return GENERIC_RESET_RESPONSE
         if manager.debug_expose_reset_token:
             return {**GENERIC_RESET_RESPONSE, "token": token}

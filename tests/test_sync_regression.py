@@ -8,7 +8,7 @@ from fastapi_startkit_auth import (
     ApiTokenManager,
     Auth,
     AuthConfig,
-    InvalidSession,
+    AuthenticationException,
     PassportGuard,
     PasswordBroker,
     SessionGuard,
@@ -114,7 +114,7 @@ def build(default_guard="api", sent=None):
     @api.post("/login")
     def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
         if not auth.attempt(payload):
-            raise InvalidSession("Invalid credentials.")
+            raise AuthenticationException("Invalid credentials.")
         return {"ok": True}
 
     @api.post("/logout")

@@ -4,7 +4,7 @@ from typing import Any
 
 from ..clients.models import Client
 from ..concurrency import call, ensure_sync
-from ..exceptions import InvalidGrant
+from ..exceptions import InvalidCredentialsException
 from ..policy import GrantPolicy
 from ..providers.base import UserProvider, user_is_active, user_is_active_async
 from ..tokens.service import IssuedToken, TokenService
@@ -50,10 +50,10 @@ class PasswordGrant:
             dummy = getattr(self._users, "dummy_verify", None)
             if callable(dummy):
                 ensure_sync(dummy(), "dummy_verify")
-            raise InvalidGrant(_INVALID_CREDENTIALS)
+            raise InvalidCredentialsException(_INVALID_CREDENTIALS)
         valid = ensure_sync(self._users.validate_credentials(user, credentials), "validate_credentials")
         if not valid or not user_is_active(self._users, user):
-            raise InvalidGrant(_INVALID_CREDENTIALS)
+            raise InvalidCredentialsException(_INVALID_CREDENTIALS)
         return self._tokens.issue(
             user_id=self._users.get_identifier(user),
             client_id=client_id,
@@ -83,10 +83,10 @@ class AsyncPasswordGrant:
             dummy = getattr(self._users, "dummy_verify", None)
             if callable(dummy):
                 await call(dummy)
-            raise InvalidGrant(_INVALID_CREDENTIALS)
+            raise InvalidCredentialsException(_INVALID_CREDENTIALS)
         valid = await call(self._users.validate_credentials, user, credentials)
         if not valid or not await user_is_active_async(self._users, user):
-            raise InvalidGrant(_INVALID_CREDENTIALS)
+            raise InvalidCredentialsException(_INVALID_CREDENTIALS)
         return await call(
             self._tokens.issue,
             user_id=self._users.get_identifier(user),

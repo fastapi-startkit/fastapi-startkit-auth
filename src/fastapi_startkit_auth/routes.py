@@ -12,15 +12,15 @@ from .clients.models import Client
 from .concurrency import call
 from .dependencies import current_user, get_auth_manager, resolve_context
 from .exceptions import (
-    AccessDenied,
-    InvalidClient,
-    InvalidGrant,
-    InvalidRequest,
-    InvalidTarget,
-    InvalidToken,
-    UnauthorizedClient,
-    UnsupportedGrantType,
-    UnsupportedResponseType,
+    AccessDeniedException,
+    InvalidClientException,
+    InvalidGrantException,
+    InvalidRequestException,
+    InvalidTargetException,
+    InvalidTokenException,
+    UnauthorizedClientException,
+    UnsupportedGrantTypeException,
+    UnsupportedResponseTypeException,
 )
 from .manager import AuthManager
 
@@ -53,7 +53,7 @@ def _single_resource(resources: list[str] | None) -> str | None:
     if not resources:
         return None
     if len(resources) > 1:
-        raise InvalidTarget("Only one resource may be requested.")
+        raise InvalidTargetException("Only one resource may be requested.")
     return resources[0]
 
 
@@ -72,22 +72,22 @@ def _client_credentials_from_request(
     try:
         decoded = base64.b64decode(header[6:], validate=True).decode("utf-8")
     except (binascii.Error, UnicodeDecodeError):
-        raise InvalidClient("Malformed Basic authorization header.")
+        raise InvalidClientException("Malformed Basic authorization header.")
     cid, separator, secret = decoded.partition(":")
     if not separator or not cid:
-        raise InvalidClient("Malformed Basic authorization header.")
+        raise InvalidClientException("Malformed Basic authorization header.")
     # RFC 6749 §2.3: a client must not use more than one authentication method per request.
     if client_secret is not None:
-        raise InvalidRequest("Use one client authentication method per request.")
+        raise InvalidRequestException("Use one client authentication method per request.")
     return unquote_plus(cid), unquote_plus(secret)
 
 
 async def _authenticate_client(manager: AuthManager, client_id: str, secret: str | None, grant: str) -> Client:
     client = await call(manager.client_repository.authenticate, client_id, secret)
     if client is None or client.revoked:
-        raise InvalidClient("Client authentication failed.")
+        raise InvalidClientException("Client authentication failed.")
     if not client.allows_grant(grant):
-        raise UnauthorizedClient(f"Client is not authorized for the {grant} grant.")
+        raise UnauthorizedClientException(f"Client is not authorized for the {grant} grant.")
     return client
 
 
@@ -97,26 +97,26 @@ async def _require_authenticated_client(
     """Authenticate the calling client for the introspection/revocation endpoints."""
     client_id, client_secret = _client_credentials_from_request(request, client_id, client_secret)
     if not client_id:
-        raise InvalidClient("Client authentication is required.")
+        raise InvalidClientException("Client authentication is required.")
     client = await call(manager.client_repository.authenticate, client_id, client_secret)
     if client is None or client.revoked:
-        raise InvalidClient("Client authentication failed.")
+        raise InvalidClientException("Client authentication failed.")
     return client
 
 
 def _require_password_grant(manager: AuthManager) -> None:
     if not manager.grant_enabled("password"):
-        raise UnsupportedGrantType('The password grant is disabled; add "password" to OAuth2Config.grant_types.')
+        raise UnsupportedGrantTypeException('The password grant is disabled; add "password" to OAuth2Config.grant_types.')
 
 
 async def _validate_authorization_request(manager: AuthManager, body: AuthorizeRequest) -> tuple[Client, list[str]]:
     if body.response_type != "code":
-        raise UnsupportedResponseType("Only response_type=code is supported.")
+        raise UnsupportedResponseTypeException("Only response_type=code is supported.")
     client = await call(manager.client_repository.find, body.client_id)
     if client is None or client.revoked:
-        raise InvalidClient("Unknown or revoked client.")
+        raise InvalidClientException("Unknown or revoked client.")
     if not client.allows_grant("authorization_code"):
-        raise UnauthorizedClient("Client is not authorized for the authorization_code grant.")
+        raise UnauthorizedClientException("Client is not authorized for the authorization_code grant.")
     scopes = manager.resolve_scopes(_scopes(body.scope))
     manager.authorization_code_grant().validate_request(
         client=client,
@@ -132,7 +132,7 @@ async def _validate_authorization_request(manager: AuthManager, body: AuthorizeR
 async def authorizing_user(request: Request, manager: AuthManager = Depends(get_auth_manager)) -> Any:
     context = await resolve_context(request, manager, manager.authorization_guard_name)
     if context.user is None:
-        raise InvalidToken("This token is not associated with a user.")
+        raise InvalidTokenException("This token is not associated with a user.")
     return context.user
 
 
@@ -183,9 +183,9 @@ def build_router(prefix: str = "") -> APIRouter:
         client_id, client_secret = _client_credentials_from_request(request, client_id, client_secret)
         resource = _single_resource(resources)
         if grant_type not in ("password", "client_credentials", "refresh_token", "authorization_code"):
-            raise UnsupportedGrantType(f"Unsupported grant_type: {grant_type!r}")
+            raise UnsupportedGrantTypeException(f"Unsupported grant_type: {grant_type!r}")
         if not manager.grant_enabled(grant_type):
-            raise UnsupportedGrantType(f"The {grant_type} grant is not enabled on this server.")
+            raise UnsupportedGrantTypeException(f"The {grant_type} grant is not enabled on this server.")
 
         if grant_type == "password":
             client = await _authenticate_client(manager, client_id, client_secret, "password") if client_id else None
@@ -200,10 +200,10 @@ def build_router(prefix: str = "") -> APIRouter:
 
         if grant_type == "client_credentials":
             if not client_id:
-                raise InvalidClient("client_id is required for the client_credentials grant.")
+                raise InvalidClientException("client_id is required for the client_credentials grant.")
             client = await _authenticate_client(manager, client_id, client_secret, "client_credentials")
             if not client.confidential:
-                raise UnauthorizedClient("Only confidential clients may use the client_credentials grant.")
+                raise UnauthorizedClientException("Only confidential clients may use the client_credentials grant.")
             issued = await call(
                 manager.client_credentials_grant().handle,
                 client=client,
@@ -214,25 +214,25 @@ def build_router(prefix: str = "") -> APIRouter:
 
         if grant_type == "refresh_token":
             if not refresh_token:
-                raise InvalidRequest("refresh_token is required.")
+                raise InvalidRequestException("refresh_token is required.")
             record = await call(manager.token_service.repository.find_refresh_token, refresh_token)
             if record is None:
-                raise InvalidGrant("The refresh token is invalid, expired, or revoked.")
+                raise InvalidGrantException("The refresh token is invalid, expired, or revoked.")
             if record.client_id is not None:
                 if not client_id:
-                    raise InvalidClient("client_id is required for this refresh token.")
+                    raise InvalidClientException("client_id is required for this refresh token.")
                 await _authenticate_client(manager, client_id, client_secret, "refresh_token")
                 # A used token replayed by any authenticated client is reuse (RFC 9700 §4.14.2):
                 # the grant below revokes its family before rejecting it.
                 if record.client_id != client_id and not record.revoked:
-                    raise InvalidGrant("The refresh token was issued to a different client.")
+                    raise InvalidGrantException("The refresh token was issued to a different client.")
             else:
                 if client_id:
                     await _authenticate_client(manager, client_id, client_secret, "refresh_token")
                 # Only the password grant issues client-less refresh tokens; replaying a used one
                 # is reuse all the same, so it also reaches the grant and revokes its family.
                 if not record.revoked and (client_id or not manager.grant_enabled("password")):
-                    raise InvalidGrant("The refresh token is not bound to the requesting client.")
+                    raise InvalidGrantException("The refresh token is not bound to the requesting client.")
             requested = _scopes(scope)
             issued = await call(
                 manager.refresh_grant().handle,
@@ -244,18 +244,18 @@ def build_router(prefix: str = "") -> APIRouter:
             return issued.to_response()
 
         if not code:
-            raise InvalidRequest("code is required.")
+            raise InvalidRequestException("code is required.")
         if not client_id:
-            raise InvalidClient("client_id is required for the authorization_code grant.")
+            raise InvalidClientException("client_id is required for the authorization_code grant.")
         client = await call(manager.client_repository.find, client_id)
         if client is None or client.revoked:
-            raise InvalidClient("Unknown or revoked client.")
+            raise InvalidClientException("Unknown or revoked client.")
         client_authenticated = False
         if client.confidential:
             client = await _authenticate_client(manager, client_id, client_secret, "authorization_code")
             client_authenticated = True
         elif not client.allows_grant("authorization_code"):
-            raise UnauthorizedClient("Client is not authorized for the authorization_code grant.")
+            raise UnauthorizedClientException("Client is not authorized for the authorization_code grant.")
         issued = await call(
             manager.authorization_code_grant().handle,
             client=client,
@@ -334,10 +334,10 @@ def build_router(prefix: str = "") -> APIRouter:
     ) -> dict[str, Any]:
         client, scopes = await _validate_authorization_request(manager, body)
         if not body.approved:
-            raise AccessDenied("The resource owner has not approved this authorization request.")
+            raise AccessDeniedException("The resource owner has not approved this authorization request.")
         guard_provider = manager.guard(manager.authorization_guard_name).provider
         if manager.provider_for_client(client) is not guard_provider:
-            raise UnauthorizedClient("This client does not act for users of the authenticated provider.")
+            raise UnauthorizedClientException("This client does not act for users of the authenticated provider.")
         code = await call(
             manager.authorization_code_grant().issue_code,
             client=client,
@@ -371,7 +371,7 @@ def build_router(prefix: str = "") -> APIRouter:
         _no_store(response)
         client = await _require_authenticated_client(manager, request, client_id, client_secret)
         if not client.confidential:
-            raise InvalidClient("Introspection requires confidential client authentication.")
+            raise InvalidClientException("Introspection requires confidential client authentication.")
         return await manager.introspect(token)
 
     # --- revocation (RFC 7009) ----------------------------------------

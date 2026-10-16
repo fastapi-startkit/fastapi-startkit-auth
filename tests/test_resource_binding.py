@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import AuthConfig, GrantPolicy
 from fastapi_startkit_auth.clients.models import Client
-from fastapi_startkit_auth.exceptions import InvalidGrant, InvalidRequest, InvalidScope, InvalidTarget, InvalidToken
+from fastapi_startkit_auth.exceptions import InvalidGrantException, InvalidRequestException, InvalidScopeException, InvalidTargetException, InvalidTokenException
 from fastapi_startkit_auth.grants.authorization_code import AuthorizationCodeGrant
 from fastapi_startkit_auth.grants.refresh import AsyncRefreshTokenGrant, RefreshTokenGrant
 from fastapi_startkit_auth.guards.guard import AsyncPassportGuard
@@ -99,7 +99,7 @@ def test_code_exchange_binds_the_token_to_the_resource(manager, spa, s256):
 def test_resource_bound_token_is_rejected_by_a_guard_without_that_audience(manager, spa, s256):
     issued = _exchange(manager, spa, _code(manager, spa, s256))
 
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         manager.guard("api").user_from_token(issued.access_token)
 
 
@@ -107,29 +107,29 @@ def test_unbound_token_is_rejected_by_the_audience_guard(manager):
     issued = manager.token_service.issue(user_id=1, client_id="c1", scopes=["read"])
 
     assert manager.guard("api").user_from_token(issued.access_token).user["id"] == 1
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         manager.guard("mcp").user_from_token(issued.access_token)
 
 
 def test_unknown_resource_is_refused(manager, spa, s256):
-    with pytest.raises(InvalidTarget):
+    with pytest.raises(InvalidTargetException):
         _code(manager, spa, s256, resource="https://evil.example.com/mcp")
 
 
 def test_exchange_with_a_different_resource_is_refused(manager, spa, s256):
     code = _code(manager, spa, s256)
 
-    with pytest.raises(InvalidTarget):
+    with pytest.raises(InvalidTargetException):
         _exchange(manager, spa, code, resource="https://other.example.com")
 
 
 def test_unknown_scope_is_refused(manager, spa, s256):
-    with pytest.raises(InvalidScope):
+    with pytest.raises(InvalidScopeException):
         _code(manager, spa, s256, scopes=("read", "admin"))
 
 
 def test_plain_pkce_is_refused_when_only_s256_is_allowed(manager, spa):
-    with pytest.raises(InvalidRequest):
+    with pytest.raises(InvalidRequestException):
         manager.authorization_code_grant().issue_code(
             client=spa,
             user_id=1,
@@ -151,7 +151,7 @@ def test_refresh_keeps_the_audience(manager, spa, s256):
 def test_refresh_for_a_different_resource_is_refused(manager, spa, s256):
     issued = _exchange(manager, spa, _code(manager, spa, s256))
 
-    with pytest.raises(InvalidTarget):
+    with pytest.raises(InvalidTargetException):
         manager.refresh_grant().handle(
             refresh_token=issued.refresh_token, scopes=None, resource="https://other", client_id=spa.id
         )
@@ -166,7 +166,7 @@ def test_client_credentials_binds_the_resource(manager):
 
 
 def test_password_grant_checks_the_scope_catalog(manager):
-    with pytest.raises(InvalidScope):
+    with pytest.raises(InvalidScopeException):
         manager.password_grant().handle(username="ada@example.com", password="secret", scopes=["admin"], client_id=None)
 
 
@@ -176,7 +176,7 @@ def test_default_policy_allows_any_scope_and_no_resource():
     policy.check_scopes(["anything"])
     policy.check_pkce(False, "c" * 43, "plain")
     policy.check_pkce(True, None, None)
-    with pytest.raises(InvalidTarget):
+    with pytest.raises(InvalidTargetException):
         policy.check_resource(MCP)
 
 
@@ -238,7 +238,7 @@ def test_default_policy_accepts_lowercase_s256(s256):
 
 
 def test_s256_only_refuses_a_challenge_without_method(manager, spa, s256):
-    with pytest.raises(InvalidRequest):
+    with pytest.raises(InvalidRequestException):
         manager.authorization_code_grant().issue_code(
             client=spa,
             user_id=1,
@@ -261,14 +261,14 @@ def test_require_pkce_applies_to_confidential_clients():
     )
 
     assert _manager(require_pkce=False).authorization_code_grant().issue_code(**request)
-    with pytest.raises(InvalidRequest):
+    with pytest.raises(InvalidRequestException):
         _manager().authorization_code_grant().issue_code(**request)
 
 
 def test_unbound_code_redeemed_with_a_resource_is_refused(manager, spa, s256):
     code = _code(manager, spa, s256, resource=None)
 
-    with pytest.raises(InvalidTarget):
+    with pytest.raises(InvalidTargetException):
         _exchange(manager, spa, code, resource=MCP)
 
 
@@ -276,7 +276,7 @@ def test_another_clients_code_fails_as_invalid_grant_before_the_resource_check(m
     code = _code(manager, spa, s256)
     thief = Client(id="thief", name="thief", confidential=False, redirect_uris=["https://spa/cb"])
 
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         _exchange(manager, thief, code, resource="https://other.example.com")
 
 
@@ -286,7 +286,7 @@ def test_guard_refuses_a_wrong_or_missing_issuer(manager):
             encoder=JWTEncoder(secret=KEY, issuer=issuer), repository=manager.token_repository
         )
         issued = foreign.issue(user_id=1, client_id="c1", scopes=["read"])
-        with pytest.raises(InvalidToken):
+        with pytest.raises(InvalidTokenException):
             manager.guard("api").user_from_token(issued.access_token)
 
 
@@ -304,12 +304,12 @@ async def test_async_service_and_guard_enforce_the_audience():
 
     assert (await mcp_guard.user_from_token(bound.access_token)).user["id"] == 1
     assert (await api_guard.user_from_token(plain.access_token)).user["id"] == 1
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         await api_guard.user_from_token(bound.access_token)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         await mcp_guard.user_from_token(plain.access_token)
 
-    with pytest.raises(InvalidTarget):
+    with pytest.raises(InvalidTargetException):
         await service.refresh(bound.refresh_token, resource="https://other.example.com")
     rotated = await service.refresh(bound.refresh_token, resource=MCP)
     assert (await mcp_guard.user_from_token(rotated.access_token)).user["id"] == 1
@@ -422,7 +422,7 @@ async def test_async_refresh_is_bound_to_the_issuing_client():
     grant = AsyncRefreshTokenGrant(service)
     issued = await service.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
 
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c2")
     assert (await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")).access_token
 
@@ -434,11 +434,11 @@ def test_replaying_a_used_refresh_token_revokes_the_family_whoever_presents_it(b
     issued = service.issue(user_id=1, client_id=bound_to, scopes=["read"], with_refresh=True)
     rotated = grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=bound_to)
 
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=replayed_by)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         service.authenticate(rotated.access_token)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         grant.handle(refresh_token=rotated.refresh_token, scopes=None, client_id=bound_to)
 
 
@@ -449,11 +449,11 @@ async def test_async_replaying_a_used_refresh_token_revokes_the_family_whoever_p
     issued = await service.issue(user_id=1, client_id=bound_to, scopes=["read"], with_refresh=True)
     rotated = await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=bound_to)
 
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=replayed_by)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         await service.authenticate(rotated.access_token)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         await grant.handle(refresh_token=rotated.refresh_token, scopes=None, client_id=bound_to)
 
 

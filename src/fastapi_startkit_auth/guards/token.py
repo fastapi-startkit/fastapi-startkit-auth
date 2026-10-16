@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import Request
 
 from ..apitokens.manager import ApiTokenManager
-from ..exceptions import InvalidSession, InvalidToken
+from ..exceptions import AuthenticationException, InvalidTokenException
 from ..concurrency import call, ensure_sync
 from ..providers.base import UserProvider, user_is_active, user_is_active_async
 from .guard import AuthContext
@@ -41,11 +41,11 @@ class TokenGuard:
         if self._session_guard is not None:
             try:
                 return self._session_guard().authenticate(request)
-            except InvalidSession:
+            except AuthenticationException:
                 pass
         token = self._extract(request)
         if not token:
-            raise InvalidToken("Not authenticated.")
+            raise AuthenticationException("Not authenticated.")
         return self.user_from_token(token)
 
     def user_from_token(self, access_token: str) -> AuthContext:
@@ -54,9 +54,9 @@ class TokenGuard:
         if user is None:
             # Orphaned token (user deleted): revoke it, fail generically.
             ensure_sync(self._tokens.revoke(record.id), "The API token manager's revoke")
-            raise InvalidToken("The API token is invalid.")
+            raise InvalidTokenException("The API token is invalid.")
         if not user_is_active(self.provider, user):
-            raise InvalidToken("The API token is invalid.")
+            raise InvalidTokenException("The API token is invalid.")
         return AuthContext(user=user, scopes=list(record.abilities), jti=record.id)
 
     def _extract(self, request: Request) -> str | None:
@@ -94,11 +94,11 @@ class AsyncTokenGuard:
         if self._session_guard is not None:
             try:
                 return await call(self._session_guard().authenticate, request)
-            except InvalidSession:
+            except AuthenticationException:
                 pass
         token = _extract_token(request, self.header)
         if not token:
-            raise InvalidToken("Not authenticated.")
+            raise AuthenticationException("Not authenticated.")
         return await self.user_from_token(token)
 
     async def user_from_token(self, access_token: str) -> AuthContext:
@@ -106,7 +106,7 @@ class AsyncTokenGuard:
         user = await call(self.provider.retrieve_by_id, record.user_id)
         if user is None:
             await call(self._tokens.revoke, record.id)
-            raise InvalidToken("The API token is invalid.")
+            raise InvalidTokenException("The API token is invalid.")
         if not await user_is_active_async(self.provider, user):
-            raise InvalidToken("The API token is invalid.")
+            raise InvalidTokenException("The API token is invalid.")
         return AuthContext(user=user, scopes=list(record.abilities), jti=record.id)

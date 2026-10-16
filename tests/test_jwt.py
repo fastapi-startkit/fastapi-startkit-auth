@@ -1,7 +1,7 @@
 
 import pytest
 
-from fastapi_startkit_auth.exceptions import InvalidToken
+from fastapi_startkit_auth.exceptions import InvalidTokenException
 from fastapi_startkit_auth.security.jwt import JWTEncoder
 
 
@@ -31,7 +31,7 @@ def test_encode_sets_expiry_and_issued_at():
 def test_expired_token_is_rejected():
     enc = make_encoder()
     token = enc.encode({"sub": "1"}, ttl_seconds=-1)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         enc.decode(token)
 
 
@@ -39,7 +39,7 @@ def test_tampered_token_is_rejected():
     enc = make_encoder()
     token = enc.encode({"sub": "1"}, ttl_seconds=60)
     other = JWTEncoder(secret="different-secret-also-32-bytes-long-yes!!", algorithm="HS256")
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         other.decode(token)
 
 
@@ -61,7 +61,7 @@ def test_issuer_is_stamped_and_verified():
     enc = make_encoder(issuer="https://auth.example.com")
     token = enc.encode({"sub": "1"}, ttl_seconds=60)
     assert enc.decode(token)["iss"] == "https://auth.example.com"
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         make_encoder(issuer="https://other.example.com").decode(token)
 
 
@@ -71,9 +71,9 @@ def test_audience_is_verified_both_ways():
     plain = enc.encode({"sub": "1"}, ttl_seconds=60)
     assert enc.decode(bound, audience="https://api/mcp")["aud"] == "https://api/mcp"
     assert enc.decode(bound, verify_audience=False)["sub"] == "1"
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         enc.decode(bound)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         enc.decode(bound, audience="https://api/other")
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         enc.decode(plain, audience="https://api/mcp")

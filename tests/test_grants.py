@@ -1,6 +1,6 @@
 import pytest
 
-from fastapi_startkit_auth.exceptions import InvalidGrant
+from fastapi_startkit_auth.exceptions import InvalidGrantException
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.security.jwt import JWTEncoder
 from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
@@ -42,13 +42,13 @@ def test_password_grant_issues_tokens(service, users):
 
 def test_password_grant_rejects_bad_password(service, users):
     grant = PasswordGrant(service, users)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         grant.handle(username="ada", password="wrong", scopes=[], client_id="c1")
 
 
 def test_password_grant_rejects_unknown_user(service, users):
     grant = PasswordGrant(service, users)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         grant.handle(username="ghost", password="secret", scopes=[], client_id="c1")
 
 
@@ -75,7 +75,7 @@ def test_refresh_grant_refuses_another_client_or_no_client(service, users):
     grant = RefreshTokenGrant(service)
 
     for client_id in ("c2", None):
-        with pytest.raises(InvalidGrant):
+        with pytest.raises(InvalidGrantException):
             grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=client_id)
     assert grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1").access_token
 
@@ -83,7 +83,7 @@ def test_refresh_grant_refuses_another_client_or_no_client(service, users):
 def test_refresh_grant_refuses_a_client_for_a_clientless_token(service, users):
     issued = PasswordGrant(service, users).handle(username="ada", password="secret", scopes=["read"], client_id=None)
 
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         RefreshTokenGrant(service).handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")
     assert RefreshTokenGrant(service).handle(refresh_token=issued.refresh_token, scopes=None).access_token
 
@@ -128,7 +128,7 @@ def test_authorization_code_rejects_bad_verifier(service, s256):
         code_challenge=s256(verifier),
         code_challenge_method="S256",
     )
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier="attacker")
 
 
@@ -145,7 +145,7 @@ def test_authorization_code_is_single_use(service, s256):
         code_challenge_method="S256",
     )
     grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier=verifier)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier=verifier)
 
 
@@ -161,5 +161,5 @@ def test_authorization_code_rejects_redirect_uri_mismatch(service, s256):
         code_challenge=s256(verifier),
         code_challenge_method="S256",
     )
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         grant.handle(client=client, code=code, redirect_uri="https://evil/cb", code_verifier=verifier)

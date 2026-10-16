@@ -6,7 +6,7 @@ from fastapi_startkit_auth import (
     ApiToken,
     AsyncAuth,
     AuthConfig,
-    InvalidSession,
+    AuthenticationException,
     current_user,
 )
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
@@ -54,7 +54,7 @@ def wire_routes(api):
     @api.post("/login")
     async def login(payload: dict = Body(...), auth: AsyncAuth = Depends(AsyncAuth.scoped)):
         if not await auth.attempt(payload):
-            raise InvalidSession("Invalid credentials.")
+            raise AuthenticationException("Invalid credentials.")
         return {"ok": True}
 
     @api.post("/logout")

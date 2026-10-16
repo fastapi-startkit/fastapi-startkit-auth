@@ -3,7 +3,7 @@ import pytest
 from fastapi_startkit_auth.config import AuthConfig, OAuth2Config
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
-from fastapi_startkit_auth.exceptions import InvalidToken
+from fastapi_startkit_auth.exceptions import InvalidTokenException
 
 from conftest import PASSWORD_GRANTS, auth_manager, oauth2_config
 
@@ -48,7 +48,7 @@ def test_guard_authenticates_issued_token(manager):
 def test_guard_rejects_revoked_token(manager):
     issued = manager.token_service.issue(user_id=1, client_id="c1", scopes=["read"])
     manager.token_service.revoke_access(manager.token_service.authenticate(issued.access_token)["jti"])
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         manager.guard().user_from_token(issued.access_token)
 
 

@@ -1,5 +1,13 @@
 from conftest import register_client
 
+from fastapi_startkit_auth import (
+    AuthException,
+    InsufficientScope,
+    InvalidCredentialsException,
+    InvalidGrantException,
+    MissingScopeException,
+)
+
 
 def get_token(client, username="ada@example.com", password="secret", scope="read write"):
     resp = client.post("/oauth/token", data={
@@ -60,6 +68,22 @@ def test_scope_protected_route_forbids_when_scope_missing(client):
     resp = client.get("/needs-admin", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 403
     assert resp.json()["error"] == "insufficient_scope"
+
+
+def test_missing_scope_exception_keeps_wire_contract():
+    assert issubclass(MissingScopeException, AuthException)
+    assert MissingScopeException.error == "insufficient_scope"
+    assert MissingScopeException.status_code == 403
+
+
+def test_invalid_credentials_keeps_invalid_grant_wire_contract():
+    assert issubclass(InvalidCredentialsException, InvalidGrantException)
+    assert InvalidCredentialsException.error == "invalid_grant"
+    assert InvalidCredentialsException.status_code == 400
+
+
+def test_insufficient_scope_alias_is_the_same_class():
+    assert InsufficientScope is MissingScopeException
 
 
 # --- refresh rotation ---------------------------------------------------

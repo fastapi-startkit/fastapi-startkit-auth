@@ -17,7 +17,7 @@ from fastapi_startkit_auth.tokens.service import TokenService
 from fastapi_startkit_auth.security.jwt import JWTEncoder
 from fastapi_startkit_auth.clients.models import Client
 from fastapi_startkit_auth.grants.authorization_code import AuthorizationCodeGrant
-from fastapi_startkit_auth.exceptions import InvalidGrant
+from fastapi_startkit_auth.exceptions import InvalidGrantException
 
 from conftest import register_client
 
@@ -94,7 +94,7 @@ def test_exchange_rejects_challengeless_code_without_client_auth():
     svc.repository.store_auth_code(
         code="leaked", client_id="pub", user_id=1, scopes=["read"], redirect_uri="https://spa/cb",
         code_challenge=None, code_challenge_method=None, expires_at=time.time() + 60)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         grant.handle(client=public, code="leaked", redirect_uri="https://spa/cb",
                      code_verifier=None, client_authenticated=False)
 

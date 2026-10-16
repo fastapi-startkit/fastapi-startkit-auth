@@ -5,7 +5,7 @@ import secrets
 from typing import Any, Callable
 
 from ..concurrency import call, ensure_sync
-from ..exceptions import InvalidGrant, ThrottleException
+from ..exceptions import InvalidGrantException, ThrottleException
 from ..providers.base import UserProvider
 from ..security.hashing import BcryptHasher, Hasher
 from .repository import InMemoryPasswordResetRepository
@@ -55,7 +55,7 @@ class PasswordBroker:
             # Do equivalent hashing work before failing so response timing does
             # not reveal whether the email is registered.
             self._hasher.make(secrets.token_urlsafe(40))
-            raise InvalidGrant(_UNKNOWN_EMAIL)
+            raise InvalidGrantException(_UNKNOWN_EMAIL)
         if self._repo.recently_created(email, self._throttle_seconds):
             raise ThrottleException(_THROTTLED)
         token = secrets.token_urlsafe(40)
@@ -67,15 +67,15 @@ class PasswordBroker:
     def reset(self, email: str, token: str, new_password: str) -> bool:
         record = self._repo.find(email)
         if record is None:
-            raise InvalidGrant(_INVALID_TOKEN)
+            raise InvalidGrantException(_INVALID_TOKEN)
         if record.age() > self._expire_minutes * 60:
             self._repo.delete(email)
-            raise InvalidGrant(_EXPIRED_TOKEN)
+            raise InvalidGrantException(_EXPIRED_TOKEN)
         if not self._hasher.verify(token, record.hashed_token):
-            raise InvalidGrant(_INVALID_TOKEN)
+            raise InvalidGrantException(_INVALID_TOKEN)
         user = self._find_user(email)
         if user is None:
-            raise InvalidGrant(_UNKNOWN_EMAIL)
+            raise InvalidGrantException(_UNKNOWN_EMAIL)
         ensure_sync(self._users.update_password(user, new_password), "update_password")
         self._repo.delete(email)
         return True
@@ -105,7 +105,7 @@ class AsyncPasswordBroker:
         user = await self._find_user(email)
         if user is None:
             await asyncio.to_thread(self._hasher.make, secrets.token_urlsafe(40))
-            raise InvalidGrant(_UNKNOWN_EMAIL)
+            raise InvalidGrantException(_UNKNOWN_EMAIL)
         if await call(self._repo.recently_created, email, self._throttle_seconds):
             raise ThrottleException(_THROTTLED)
         token = secrets.token_urlsafe(40)
@@ -117,15 +117,15 @@ class AsyncPasswordBroker:
     async def reset(self, email: str, token: str, new_password: str) -> bool:
         record = await call(self._repo.find, email)
         if record is None:
-            raise InvalidGrant(_INVALID_TOKEN)
+            raise InvalidGrantException(_INVALID_TOKEN)
         if record.age() > self._expire_minutes * 60:
             await call(self._repo.delete, email)
-            raise InvalidGrant(_EXPIRED_TOKEN)
+            raise InvalidGrantException(_EXPIRED_TOKEN)
         if not await asyncio.to_thread(self._hasher.verify, token, record.hashed_token):
-            raise InvalidGrant(_INVALID_TOKEN)
+            raise InvalidGrantException(_INVALID_TOKEN)
         user = await self._find_user(email)
         if user is None:
-            raise InvalidGrant(_UNKNOWN_EMAIL)
+            raise InvalidGrantException(_UNKNOWN_EMAIL)
         await call(self._users.update_password, user, new_password)
         await call(self._repo.delete, email)
         return True

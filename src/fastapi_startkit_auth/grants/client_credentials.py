@@ -4,7 +4,7 @@ from typing import Any
 
 from ..clients.models import Client
 from ..concurrency import call
-from ..exceptions import UnauthorizedClient
+from ..exceptions import UnauthorizedClientException
 from ..policy import GrantPolicy, ensure_client_may
 from ..tokens.service import IssuedToken, TokenService
 
@@ -12,7 +12,7 @@ from ..tokens.service import IssuedToken, TokenService
 def _check(policy: GrantPolicy, client: Client, scopes: list[str], resource: str | None) -> None:
     # A public client has no secret, so anyone holding its id could mint tokens.
     if not client.confidential:
-        raise UnauthorizedClient("Only confidential clients may use the client_credentials grant.")
+        raise UnauthorizedClientException("Only confidential clients may use the client_credentials grant.")
     ensure_client_may(client, "client_credentials")
     policy.check_scopes(scopes)
     policy.check_client_scopes(client, scopes)

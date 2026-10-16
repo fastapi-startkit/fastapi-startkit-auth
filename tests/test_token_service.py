@@ -1,6 +1,6 @@
 import pytest
 
-from fastapi_startkit_auth.exceptions import InvalidGrant, InvalidToken
+from fastapi_startkit_auth.exceptions import InvalidGrantException, InvalidTokenException
 from fastapi_startkit_auth.security.jwt import JWTEncoder
 from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
 from fastapi_startkit_auth.tokens.service import TokenService
@@ -41,7 +41,7 @@ def test_authenticate_rejects_revoked_access_token():
     issued = svc.issue(user_id=1, client_id="c1", scopes=["read"])
     claims = svc.authenticate(issued.access_token)
     svc.revoke_access(claims["jti"])
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         svc.authenticate(issued.access_token)
 
 
@@ -54,22 +54,22 @@ def test_refresh_rotates_and_revokes_old_tokens():
     assert rotated.refresh_token != issued.refresh_token
 
     # old access token is now revoked
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         svc.authenticate(issued.access_token)
     # new access token works
     assert svc.authenticate(rotated.access_token)["sub"] == "1"
     # replaying the old refresh token fails and revokes the whole family
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         svc.refresh(issued.refresh_token)
-    with pytest.raises(InvalidToken):
+    with pytest.raises(InvalidTokenException):
         svc.authenticate(rotated.access_token)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         svc.refresh(rotated.refresh_token)
 
 
 def test_refresh_rejects_unknown_token():
     svc = make_service()
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         svc.refresh("not-a-real-refresh-token")
 
 
@@ -83,7 +83,7 @@ def test_refresh_can_narrow_scopes():
 def test_refresh_cannot_widen_scopes():
     svc = make_service()
     issued = svc.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
-    with pytest.raises(InvalidGrant):
+    with pytest.raises(InvalidGrantException):
         svc.refresh(issued.refresh_token, scopes=["read", "admin"])
 
 

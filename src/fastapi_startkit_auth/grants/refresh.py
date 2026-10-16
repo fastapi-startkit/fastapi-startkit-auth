@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from ..concurrency import call, ensure_sync
-from ..exceptions import InvalidGrant
+from ..exceptions import InvalidGrantException
 from ..providers.base import active_user, active_user_async
 from ..tokens.service import IssuedToken, TokenService
 
@@ -26,17 +26,17 @@ def owner_resolver(user_provider: Any, owner_provider: OwnerProviderResolver | N
 
 def ensure_owner_active(provider: Any, user_id: Any) -> None:
     if provider is not None and user_id is not None and active_user(provider, user_id) is None:
-        raise InvalidGrant(INACTIVE_OWNER)
+        raise InvalidGrantException(INACTIVE_OWNER)
 
 
 def ensure_issued_to(record: Any, client_id: str | None) -> None:
     if record.client_id != client_id:
-        raise InvalidGrant("The refresh token was not issued to this client.")
+        raise InvalidGrantException("The refresh token was not issued to this client.")
 
 
 async def ensure_owner_active_async(provider: Any, user_id: Any) -> None:
     if provider is not None and user_id is not None and await active_user_async(provider, user_id) is None:
-        raise InvalidGrant(INACTIVE_OWNER)
+        raise InvalidGrantException(INACTIVE_OWNER)
 
 
 class RefreshTokenGrant:

@@ -6,7 +6,7 @@ from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 
 from .concurrency import call
-from .exceptions import AuthError, InsufficientScope, InvalidToken
+from .exceptions import AuthenticationException, AuthException, InvalidTokenException, MissingScopeException
 from .guards.guard import AuthContext
 from .manager import AuthManager
 from .request_context import _auth_request
@@ -46,7 +46,7 @@ async def resolve_context(request: Request, manager: AuthManager, guard: str | N
         return await call(authenticate, request)
     token = _bearer_token(request)
     if not token:
-        raise InvalidToken("Not authenticated.")
+        raise AuthenticationException("Not authenticated.")
     return await call(resolved.user_from_token, token)
 
 
@@ -62,14 +62,14 @@ async def current_context(
 async def auth(context: AuthContext = Depends(current_context)) -> AuthContext:
     """Like ``current_context`` but also rejects user-less (client_credentials) tokens."""
     if context.user is None:
-        raise InvalidToken("This token is not associated with a user.")
+        raise InvalidTokenException("This token is not associated with a user.")
     return context
 
 
 def current_user(context: AuthContext = Depends(current_context)) -> Any:
     """Return the authenticated user model (401 if the token carries no user)."""
     if context.user is None:
-        raise InvalidToken("This token is not associated with a user.")
+        raise InvalidTokenException("This token is not associated with a user.")
     return context.user
 
 
@@ -81,7 +81,7 @@ async def optional_user(
     """Return the authenticated user, or ``None`` if unauthenticated/invalid."""
     try:
         return (await resolve_context(request, manager)).user
-    except AuthError:
+    except AuthException:
         return None
 
 
@@ -96,7 +96,7 @@ def require_scopes(*scopes: str, mode: str = "all") -> Callable[..., AuthContext
     def dependency(context: AuthContext = Depends(current_context)) -> AuthContext:
         ok = context.can_any(required) if mode == "any" else context.can_all(required)
         if not ok:
-            raise InsufficientScope(
+            raise MissingScopeException(
                 f"Requires scope(s): {' '.join(required)} (mode={mode})."
             )
         return context

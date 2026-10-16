@@ -66,7 +66,7 @@ Each item lists what changed and what to do.
   in `SessionConfig.csrf_exempt_paths`.
 - **OAuth client store defaults to `"database"`** (the ORM `oauth_clients`
   table). *Migrate:* publish and run the migrations, or set
-  `OAuth2Config(clients=OAuthClientsConfig(store="memory"))`.
+  `OAuth2Config(clients=OAuthClientConfig(store="memory"))`.
 - **The in-memory OAuth client store is async.** `InMemoryClientRepository`
   methods (`register`, `add`, `find`, `all`, `authenticate`, `revoke`,
   `delete`) are coroutines, like `OrmClientRepository`, and `store="memory"` now
@@ -74,6 +74,14 @@ Each item lists what changed and what to do.
   synchronous custom store passed with `store="instance"` keeps the sync grants.
   *Migrate:*
   `await` client-store calls and the `handle` / `issue_code` of those grants.
+- **Exception classes take an `Exception` suffix.** `AuthError` is now
+  `AuthException`, and every subclass gets the suffix (`InvalidToken` →
+  `InvalidTokenException`, `InsufficientScope` → `MissingScopeException`, and so
+  on). Wire error codes and HTTP statuses are unchanged. The old names remain as
+  deprecated aliases. *Migrate:* import the `*Exception` names.
+- **Bad password on the password grant raises `InvalidCredentialsException`**, a
+  subclass of `InvalidGrantException`. The response is unchanged (`invalid_grant`,
+  400), so existing `except InvalidGrantException` blocks still catch it.
 - **Persistent stores are named `"database"`.** `store="orm"` still works for
   sessions, API tokens, OAuth tokens and OAuth clients, but emits a
   `DeprecationWarning` and will be removed in a future release. *Migrate:*

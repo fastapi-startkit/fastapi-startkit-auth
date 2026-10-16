@@ -13,7 +13,7 @@ from fastapi import Body, Depends, FastAPI, Request
 from fastapi_startkit_auth import (
     Auth,
     AuthConfig,
-    InvalidSession,
+    AuthenticationException,
     current_user,
     optional_user,
 )
@@ -59,7 +59,7 @@ def wire_routes(api):
     @api.post("/login")
     def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
         if not auth.attempt(payload):
-            raise InvalidSession("Invalid credentials.")
+            raise AuthenticationException("Invalid credentials.")
         return {"ok": True}
 
     @api.post("/login-as/{user_id}")
@@ -243,7 +243,7 @@ def test_session_guard_resolves_user_from_session_id():
     context = guard.user_from_token(record.id)
     assert context.user["id"] == 1
     assert context.scopes == ["*"]
-    with pytest.raises(InvalidSession):
+    with pytest.raises(AuthenticationException):
         guard.user_from_token("unknown-session-id")
 
 
