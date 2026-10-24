@@ -23,6 +23,7 @@ from .grants.authorization_code import AsyncAuthorizationCodeGrant, Authorizatio
 from .grants.client_credentials import AsyncClientCredentialsGrant, ClientCredentialsGrant
 from .grants.password import AsyncPasswordGrant, PasswordGrant
 from .grants.refresh import AsyncRefreshTokenGrant, RefreshTokenGrant
+from .guards.chain import AsyncChainGuard, ChainGuard, guard_is_async
 from .guards.guard import AsyncPassportGuard, Guard, PassportGuard
 from .guards.session import AsyncSessionGuard, SessionGuard
 from .guards.token import AsyncTokenGuard, TokenGuard
@@ -89,7 +90,7 @@ class AuthManager:
         self._brokers: dict[str, PasswordBroker | AsyncPasswordBroker] = {
             name: self._build_broker(spec) for name, spec in cfg.get("passwords", {}).items()
         }
-        self._guard_drivers: dict[str, GuardFactory] = {}
+        self._guard_drivers: dict[str, GuardFactory] = {"chain": self._build_chain_guard}
         self._guards: dict[str, Guard] | None = None
         self._session_config: SessionConfig | None = None
         self._session_store: SessionStore | None = None
@@ -281,6 +282,18 @@ class AuthManager:
             header=config.header,
             session_guard=(lambda: self.guard(session_guard)) if session_guard else None,
         )
+
+    def _build_chain_guard(self, name: str, spec: dict[str, Any]) -> Guard:
+        members = []
+        for member in spec.get("guards", []):
+            member_spec = self._guard_specs.get(member)
+            if member_spec is None:
+                raise ValueError(f"Chain guard {name!r} lists {member!r}, which AuthConfig.guards does not define.")
+            if member_spec["driver"] == "chain":
+                raise ValueError(f"Chain guard {name!r} cannot include the chain guard {member!r}.")
+            members.append(self._build_guard(member, member_spec))
+        guard_class = AsyncChainGuard if any(guard_is_async(member) for member in members) else ChainGuard
+        return guard_class(name=name, guards=members)
 
     def guard(self, name: str | None = None) -> Guard:
         name = name or self.default_guard_name()

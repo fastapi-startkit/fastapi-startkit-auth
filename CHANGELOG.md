@@ -104,6 +104,16 @@ using the ORM stores:
 
 ### Added
 
+- `Auth.guard(name)` / `AsyncAuth.guard(name)` on the class is a FastAPI
+  dependency: `user = Depends(Auth.guard("api"))` resolves the user through
+  that guard's driver and raises 401 otherwise. Dependencies with the same name
+  compare equal, so `app.dependency_overrides[Auth.guard("api")]` works. On an
+  instance (`auth.guard(name)` from `Depends(Auth.scoped)`) it still returns the
+  guard object. *Upgrade note:* class-level `Auth.guard()` inside a request used
+  to return the guard; use `Auth.scoped` or the manager for that.
+- `ChainGuard(guards=[...])` (`{"driver": "chain"}`): authenticates through the
+  first member guard that accepts the request, e.g. a bearer token backed by
+  the browser session.
 - Refresh token families with reuse detection: replaying a rotated refresh token
   revokes the whole family, whoever presents it: the owning client, another
   authenticated client, or no client at all for unbound password-grant tokens.

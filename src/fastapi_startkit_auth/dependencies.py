@@ -85,6 +85,35 @@ async def optional_user(
         return None
 
 
+class GuardDependency:
+    """FastAPI dependency resolving the request's user through a named guard.
+
+    ``user = Depends(Auth.guard("api"))`` authenticates with whatever the
+    guard's driver reads (bearer token, session cookie, API token, a chain of
+    them) and raises 401 when it cannot, or when the credential has no user.
+    Equal names compare equal, so ``app.dependency_overrides`` can key on
+    ``Auth.guard("api")``.
+    """
+
+    def __init__(self, name: str | None = None) -> None:
+        self.name = name
+
+    async def __call__(self, request: Request, token: str | None = Depends(_bearer)) -> Any:
+        context = await resolve_context(request, get_auth_manager(request), self.name)
+        if context.user is None:
+            raise InvalidTokenException("This token is not associated with a user.")
+        return context.user
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, GuardDependency) and other.name == self.name
+
+    def __hash__(self) -> int:
+        return hash((GuardDependency, self.name))
+
+    def __repr__(self) -> str:
+        return f"GuardDependency({self.name!r})"
+
+
 def require_scopes(*scopes: str, mode: str = "all") -> Callable[..., AuthContext]:
     """Dependency factory enforcing token abilities (Passport-style scopes).
 

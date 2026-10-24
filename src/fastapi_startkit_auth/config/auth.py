@@ -38,6 +38,14 @@ class ApiTokenGuard:
 
 
 @dataclass
+class ChainGuard:
+    """Authenticates through the first of ``guards`` (guard names) that accepts the request."""
+
+    guards: list[str] = field(default_factory=list)
+    driver: Literal["chain"] = "chain"
+
+
+@dataclass
 class SessionConfig:
     """Cookie sessions, enabled by ``AuthSessionProvider``.
 

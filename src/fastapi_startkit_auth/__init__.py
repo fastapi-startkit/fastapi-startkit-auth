@@ -25,6 +25,7 @@ from .config import (
     SessionConfig,
 )
 from .dependencies import (
+    GuardDependency,
     auth,
     current_user,
     optional_user,
@@ -62,6 +63,7 @@ from .exceptions import (
 )
 from .policy import GrantPolicy
 from .facade import AsyncAuth, Auth
+from .guards.chain import AsyncChainGuard, ChainGuard
 from .guards.guard import AsyncPassportGuard, PassportGuard
 from .guards.session import AsyncSessionGuard, SessionGuard
 from .guards.token import AsyncTokenGuard, TokenGuard
@@ -108,6 +110,7 @@ __all__ = (
     "UnsupportedGrantTypeException",
     "UnsupportedResponseTypeException",
     "current_user",
+    "GuardDependency",
     "optional_user",
     "require_scopes",
     "require_abilities",
@@ -154,6 +157,8 @@ __all__ = (
     "AsyncPassportGuard",
     "AsyncSessionGuard",
     "AsyncTokenGuard",
+    "ChainGuard",
+    "AsyncChainGuard",
     "AsyncApiTokenManager",
     "PasswordBroker",
     "AsyncPasswordBroker",
