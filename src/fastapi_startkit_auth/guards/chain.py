@@ -24,7 +24,9 @@ class ChainGuard:
     """Tries each member guard in order and returns the first that authenticates.
 
     Corresponds to a ``{"driver": "chain", "guards": [...]}`` entry, e.g. a
-    bearer-token guard backed by the first-party browser session.
+    bearer-token guard backed by the first-party browser session. A bearer token
+    the request presents is final: when a token guard rejects it, the chain
+    fails instead of falling back to a later guard.
     """
 
     def __init__(self, name: str, guards: list[Guard]) -> None:
@@ -40,6 +42,8 @@ class ChainGuard:
             try:
                 return ensure_sync(_authenticate(guard, request), f"Guard {guard.name!r}")
             except AuthException as failure:
+                if _rejected_presented_token(guard, request):
+                    raise
                 failures.append(failure)
         raise failures[0]
 
@@ -67,6 +71,8 @@ class AsyncChainGuard:
             try:
                 return await _authenticate_async(guard, request)
             except AuthException as failure:
+                if _rejected_presented_token(guard, request):
+                    raise
                 failures.append(failure)
         raise failures[0]
 
@@ -78,6 +84,10 @@ class AsyncChainGuard:
             except AuthException as failure:
                 failures.append(failure)
         raise failures[0]
+
+
+def _rejected_presented_token(guard: Any, request: Request) -> bool:
+    return getattr(guard, "authenticate", None) is None and _bearer_token(request) is not None
 
 
 def _authenticate(guard: Any, request: Request) -> Any:

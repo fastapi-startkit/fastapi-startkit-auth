@@ -104,6 +104,31 @@ def test_chain_falls_back_to_the_session(guarded_app):
     assert client.get("/bearer-only").status_code == 401
 
 
+def test_a_rejected_bearer_token_does_not_fall_back_to_the_session(guarded_app):
+    api, _ = guarded_app
+    client = TestClient(api, base_url="https://testserver")
+    assert client.post("/login", json={"email": "grace@example.com", "password": "hopper"}).json() == {"ok": True}
+    response = client.get("/me", headers={"Authorization": "Bearer nope"})
+    assert response.status_code == 401
+    assert response.json()["error"] == "invalid_token"
+
+
+def test_a_first_party_only_guard_refuses_tokens_issued_to_a_client():
+    guards = {"api": OAuth2Guard(provider="users", first_party_only=True)}
+    api = FastAPI()
+    manager = register_auth(api, session_config(guards=guards, default_guard="api"), session={}, oauth2=oauth2_config())
+
+    @api.get("/me")
+    def me(user=Depends(Auth.guard("api"))):
+        return {"id": user["id"]}
+
+    client = TestClient(api, base_url="https://testserver")
+    assert client.get("/me", headers=bearer(manager, user_id=2)).json() == {"id": 2}
+    response = client.get("/me", headers=bearer(manager, user_id=2, client_id="connector"))
+    assert response.status_code == 401
+    assert response.json()["error"] == "invalid_token"
+
+
 def test_dependency_overrides_key_on_the_guard_name(guarded_app):
     api, _ = guarded_app
     api.dependency_overrides[Auth.guard("auth.api")] = lambda: {"id": 99}

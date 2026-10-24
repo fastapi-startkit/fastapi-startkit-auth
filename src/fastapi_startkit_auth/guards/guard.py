@@ -10,6 +10,7 @@ from ..tokens.service import TokenService
 
 
 _INACTIVE_SUBJECT = "The token subject is not active."
+_CLIENT_TOKEN = "The token was issued to a client, and this guard accepts first-party tokens only."
 
 
 @dataclass
@@ -61,19 +62,27 @@ class PassportGuard:
     :class:`TokenService` (which validates signature, expiry, and revocation)
     with the guard's configured user provider. A guard with an ``audience`` only
     accepts tokens bound to that resource, and tokens bound to a resource are only
-    accepted by a guard serving it.
+    accepted by a guard serving it. A ``first_party_only`` guard refuses tokens
+    issued to an OAuth client, accepting only the application's own tokens.
     """
 
     def __init__(
-        self, name: str, token_service: TokenService, provider: UserProvider, audience: str | None = None
+        self,
+        name: str,
+        token_service: TokenService,
+        provider: UserProvider,
+        audience: str | None = None,
+        first_party_only: bool = False,
     ) -> None:
         self.name = name
         self._tokens = token_service
         self.provider = provider
         self.audience = audience
+        self.first_party_only = first_party_only
 
     def user_from_token(self, access_token: str) -> AuthContext:
         claims = ensure_sync(self._tokens.authenticate(access_token, audience=self.audience), "The token service's authenticate")
+        _require_first_party(self.first_party_only, claims)
         return _context_from_claims(claims, self._resolve_user(claims.get("sub")))
 
     def _resolve_user(self, sub: Any) -> Any | None:
@@ -87,6 +96,11 @@ class PassportGuard:
         return user
 
 
+def _require_first_party(first_party_only: bool, claims: dict[str, Any]) -> None:
+    if first_party_only and claims.get("client_id") is not None:
+        raise InvalidTokenException(_CLIENT_TOKEN)
+
+
 def _context_from_claims(claims: dict[str, Any], user: Any | None) -> AuthContext:
     return AuthContext(
         user=user,
@@ -97,14 +111,23 @@ def _context_from_claims(claims: dict[str, Any], user: Any | None) -> AuthContex
 
 
 class AsyncPassportGuard:
-    def __init__(self, name: str, token_service: Any, provider: Any, audience: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        token_service: Any,
+        provider: Any,
+        audience: str | None = None,
+        first_party_only: bool = False,
+    ) -> None:
         self.name = name
         self._tokens = token_service
         self.provider = provider
         self.audience = audience
+        self.first_party_only = first_party_only
 
     async def user_from_token(self, access_token: str) -> AuthContext:
         claims = await call(self._tokens.authenticate, access_token, audience=self.audience)
+        _require_first_party(self.first_party_only, claims)
         return _context_from_claims(claims, await self._resolve_user(claims.get("sub")))
 
     async def _resolve_user(self, sub: Any) -> Any | None:

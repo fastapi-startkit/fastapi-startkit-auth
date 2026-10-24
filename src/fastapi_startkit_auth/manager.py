@@ -267,7 +267,13 @@ class AuthManager:
                 stacklevel=2,
             )
         guard_class = AsyncPassportGuard if is_async_provider(provider) or self._tokens_async() else PassportGuard
-        return guard_class(name=name, token_service=self.token_service, provider=provider, audience=audience)
+        return guard_class(
+            name=name,
+            token_service=self.token_service,
+            provider=provider,
+            audience=audience,
+            first_party_only=bool(spec.get("first_party_only", False)),
+        )
 
     def _build_session_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))

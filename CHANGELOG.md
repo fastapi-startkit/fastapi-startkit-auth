@@ -113,7 +113,11 @@ using the ORM stores:
   to return the guard; use `Auth.scoped` or the manager for that.
 - `ChainGuard(guards=[...])` (`{"driver": "chain"}`): authenticates through the
   first member guard that accepts the request, e.g. a bearer token backed by
-  the browser session.
+  the browser session. A bearer token the request presents is final: when a
+  token member rejects it, the chain fails instead of trying the session.
+- `OAuth2Guard(first_party_only=True)` refuses access tokens issued to an OAuth
+  client (`client_id` set), so a first-party API accepts only the
+  application's own login and personal tokens.
 - `AuthManager.on_authenticated(listener)`: `listener(request, user, guard)`
   runs whenever a guard dependency resolves a user, before the route handler,
   for activity tracking or request-scoped state.

@@ -28,6 +28,7 @@ class SessionGuard:
 class OAuth2Guard:
     provider: str = "users"
     audience: str | None = None
+    first_party_only: bool = False
     driver: Literal["oauth2"] = "oauth2"
 
 
