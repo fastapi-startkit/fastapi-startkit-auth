@@ -1,5 +1,5 @@
 import pytest
-from fastapi import Body, Depends, FastAPI
+from fastapi import Body, Depends, FastAPI, Request
 
 from fastapi_startkit_auth import AsyncAuth, AsyncChainGuard, Auth, AuthConfig, ChainGuard, GuardDependency
 from fastapi_startkit_auth.config import ChainGuard as ChainGuardConfig
@@ -108,6 +108,33 @@ def test_dependency_overrides_key_on_the_guard_name(guarded_app):
     api, _ = guarded_app
     api.dependency_overrides[Auth.guard("auth.api")] = lambda: {"id": 99}
     assert TestClient(api, base_url="https://testserver").get("/me").json() == {"id": 99}
+
+
+def test_authenticated_listeners_receive_the_resolved_user_before_the_handler(guarded_app):
+    api, manager = guarded_app
+    seen = []
+
+    @manager.on_authenticated
+    async def remember(request, user, guard):
+        request.state.seen_user = user["id"]
+        seen.append((user["id"], guard))
+
+    @api.get("/seen")
+    def seen_route(request: Request, user=Depends(Auth.guard("auth.api"))):
+        return {"seen": request.state.seen_user}
+
+    client = TestClient(api, base_url="https://testserver")
+    assert client.get("/seen", headers=bearer(manager, user_id=2)).json() == {"seen": 2}
+    assert seen == [(2, "auth.api")]
+
+
+def test_authenticated_listeners_are_skipped_when_authentication_fails(guarded_app):
+    api, manager = guarded_app
+    seen = []
+    manager.on_authenticated(lambda request, user, guard: seen.append(user))
+
+    assert TestClient(api, base_url="https://testserver").get("/me").status_code == 401
+    assert seen == []
 
 
 def test_chain_guard_rejects_unknown_members():

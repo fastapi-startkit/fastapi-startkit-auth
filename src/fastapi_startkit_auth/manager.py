@@ -40,6 +40,7 @@ from .tokens.repository import InMemoryTokenRepository
 from .tokens.service import AsyncTokenService, TokenService
 
 GuardFactory = Callable[[str, dict[str, Any]], Guard]
+AuthenticatedListener = Callable[[Any, Any, str | None], Any]
 
 FEATURE_PROVIDERS = {
     "session": "AuthSessionProvider",
@@ -98,6 +99,7 @@ class AuthManager:
         self._api_token_config: ApiTokenConfig | None = None
         self._api_tokens: ApiTokenManager | AsyncApiTokenManager | None = None
         self.csrf_exempt_paths: list[str] = []
+        self._authenticated_listeners: list[AuthenticatedListener] = []
 
     @property
     def config(self) -> type[AuthConfig]:
@@ -215,6 +217,21 @@ class AuthManager:
                 raise ValueError(
                     f"ApiTokenConfig.session_guard {name!r} must name a session guard in AuthConfig.guards."
                 )
+
+    # --- events ---------------------------------------------------------
+    def on_authenticated(self, listener: AuthenticatedListener) -> AuthenticatedListener:
+        """Call ``listener(request, user, guard)`` whenever a guard dependency resolves a user.
+
+        Runs before the route handler, so listeners can record activity or put
+        request-scoped state in place. Async listeners are awaited; sync ones
+        run in the threadpool.
+        """
+        self._authenticated_listeners.append(listener)
+        return listener
+
+    async def authenticated(self, request: Any, user: Any, guard: str | None) -> None:
+        for listener in self._authenticated_listeners:
+            await call(listener, request, user, guard)
 
     # --- guards ---------------------------------------------------------
     def register_guard_driver(self, driver: str, factory: GuardFactory) -> None:

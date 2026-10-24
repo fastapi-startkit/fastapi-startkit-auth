@@ -91,6 +91,7 @@ class GuardDependency:
     ``user = Depends(Auth.guard("api"))`` authenticates with whatever the
     guard's driver reads (bearer token, session cookie, API token, a chain of
     them) and raises 401 when it cannot, or when the credential has no user.
+    A resolved user is announced to ``AuthManager.on_authenticated`` listeners.
     Equal names compare equal, so ``app.dependency_overrides`` can key on
     ``Auth.guard("api")``.
     """
@@ -99,9 +100,11 @@ class GuardDependency:
         self.name = name
 
     async def __call__(self, request: Request, token: str | None = Depends(_bearer)) -> Any:
-        context = await resolve_context(request, get_auth_manager(request), self.name)
+        manager = get_auth_manager(request)
+        context = await resolve_context(request, manager, self.name)
         if context.user is None:
             raise InvalidTokenException("This token is not associated with a user.")
+        await manager.authenticated(request, context.user, self.name)
         return context.user
 
     def __eq__(self, other: object) -> bool:

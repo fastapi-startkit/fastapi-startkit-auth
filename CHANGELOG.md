@@ -114,6 +114,9 @@ using the ORM stores:
 - `ChainGuard(guards=[...])` (`{"driver": "chain"}`): authenticates through the
   first member guard that accepts the request, e.g. a bearer token backed by
   the browser session.
+- `AuthManager.on_authenticated(listener)`: `listener(request, user, guard)`
+  runs whenever a guard dependency resolves a user, before the route handler,
+  for activity tracking or request-scoped state.
 - Refresh token families with reuse detection: replaying a rotated refresh token
   revokes the whole family, whoever presents it: the owning client, another
   authenticated client, or no client at all for unbound password-grant tokens.
