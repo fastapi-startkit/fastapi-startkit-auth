@@ -7,6 +7,7 @@ from fastapi import Request
 from ..concurrency import call, ensure_sync, is_async
 from ..exceptions import AuthException, InvalidTokenException
 from .guard import AuthContext, Guard
+from .session import AsyncSessionGuard, SessionGuard
 
 
 def _bearer_token(request: Request) -> str | None:
@@ -24,9 +25,10 @@ class ChainGuard:
     """Tries each member guard in order and returns the first that authenticates.
 
     Corresponds to a ``{"driver": "chain", "guards": [...]}`` entry, e.g. a
-    bearer-token guard backed by the first-party browser session. A bearer token
-    the request presents is final: when a token guard rejects it, the chain
-    fails instead of falling back to a later guard.
+    bearer-token guard backed by the first-party browser session. A token the
+    request presents is final: when the member that reads it rejects it, the
+    chain fails instead of falling back to a later guard. ``user_from_token``
+    skips session members, which would read the token as a session id.
     """
 
     def __init__(self, name: str, guards: list[Guard]) -> None:
@@ -49,12 +51,12 @@ class ChainGuard:
 
     def user_from_token(self, access_token: str) -> AuthContext:
         failures: list[AuthException] = []
-        for guard in self.guards:
+        for guard in _token_members(self.guards):
             try:
                 return ensure_sync(guard.user_from_token(access_token), f"Guard {guard.name!r}")
             except AuthException as failure:
                 failures.append(failure)
-        raise failures[0]
+        raise _first_failure(failures)
 
 
 class AsyncChainGuard:
@@ -78,16 +80,33 @@ class AsyncChainGuard:
 
     async def user_from_token(self, access_token: str) -> AuthContext:
         failures: list[AuthException] = []
-        for guard in self.guards:
+        for guard in _token_members(self.guards):
             try:
                 return await call(guard.user_from_token, access_token)
             except AuthException as failure:
                 failures.append(failure)
-        raise failures[0]
+        raise _first_failure(failures)
 
 
 def _rejected_presented_token(guard: Any, request: Request) -> bool:
-    return getattr(guard, "authenticate", None) is None and _bearer_token(request) is not None
+    return _presented_token(guard, request) is not None
+
+
+def _presented_token(guard: Any, request: Request) -> str | None:
+    presented_token = getattr(guard, "presented_token", None)
+    if presented_token is not None:
+        return presented_token(request)
+    if getattr(guard, "authenticate", None) is None:
+        return _bearer_token(request)
+    return None
+
+
+def _token_members(guards: list[Guard]) -> list[Guard]:
+    return [guard for guard in guards if not isinstance(guard, (SessionGuard, AsyncSessionGuard))]
+
+
+def _first_failure(failures: list[AuthException]) -> AuthException:
+    return failures[0] if failures else InvalidTokenException("Not authenticated.")
 
 
 def _authenticate(guard: Any, request: Request) -> Any:

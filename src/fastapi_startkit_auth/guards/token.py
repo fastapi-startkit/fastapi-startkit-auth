@@ -59,6 +59,9 @@ class TokenGuard:
             raise InvalidTokenException("The API token is invalid.")
         return AuthContext(user=user, scopes=list(record.abilities), jti=record.id)
 
+    def presented_token(self, request: Request) -> str | None:
+        return _extract_token(request, self.header) or None
+
     def _extract(self, request: Request) -> str | None:
         return _extract_token(request, self.header)
 
@@ -100,6 +103,9 @@ class AsyncTokenGuard:
         if not token:
             raise AuthenticationException("Not authenticated.")
         return await self.user_from_token(token)
+
+    def presented_token(self, request: Request) -> str | None:
+        return _extract_token(request, self.header) or None
 
     async def user_from_token(self, access_token: str) -> AuthContext:
         record = await call(self._tokens.verify, access_token)

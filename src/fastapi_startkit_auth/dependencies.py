@@ -93,7 +93,9 @@ class GuardDependency:
     them) and raises 401 when it cannot, or when the credential has no user.
     A resolved user is announced to ``AuthManager.on_authenticated`` listeners.
     Equal names compare equal, so ``app.dependency_overrides`` can key on
-    ``Auth.guard("api")``.
+    ``Auth.guard("api")``. Inside a request, other attributes (``provider``,
+    ``user_from_token``, ``authenticate``...) are read from the named guard, so
+    code that used class-level ``Auth.guard(name)`` as the guard keeps working.
     """
 
     def __init__(self, name: str | None = None) -> None:
@@ -106,6 +108,17 @@ class GuardDependency:
             raise InvalidTokenException("This token is not associated with a user.")
         await manager.authenticated(request, context.user, self.name)
         return context.user
+
+    def __getattr__(self, attribute: str) -> Any:
+        if attribute.startswith("__") or attribute == "name":
+            raise AttributeError(attribute)
+        context = _auth_request.get()
+        if context is None or not context.active:
+            raise AttributeError(
+                f"{type(self).__name__} has no attribute {attribute!r} outside a request; "
+                "use the AuthManager's guard() there."
+            )
+        return getattr(context.manager.guard(self.name), attribute)
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, GuardDependency) and other.name == self.name
