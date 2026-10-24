@@ -85,6 +85,51 @@ async def optional_user(
         return None
 
 
+class GuardDependency:
+    """FastAPI dependency resolving the request's user through a named guard.
+
+    ``user = Depends(Auth.guard("api"))`` authenticates with whatever the
+    guard's driver reads (bearer token, session cookie, API token, a chain of
+    them) and raises 401 when it cannot, or when the credential has no user.
+    A resolved user is announced to ``AuthManager.on_authenticated`` listeners.
+    Equal names compare equal, so ``app.dependency_overrides`` can key on
+    ``Auth.guard("api")``. Inside a request, other attributes (``provider``,
+    ``user_from_token``, ``authenticate``...) are read from the named guard, so
+    code that used class-level ``Auth.guard(name)`` as the guard keeps working.
+    """
+
+    def __init__(self, name: str | None = None) -> None:
+        self.name = name
+
+    async def __call__(self, request: Request, token: str | None = Depends(_bearer)) -> Any:
+        manager = get_auth_manager(request)
+        context = await resolve_context(request, manager, self.name)
+        if context.user is None:
+            raise InvalidTokenException("This token is not associated with a user.")
+        await manager.authenticated(request, context.user, self.name)
+        return context.user
+
+    def __getattr__(self, attribute: str) -> Any:
+        if attribute.startswith("__") or attribute == "name":
+            raise AttributeError(attribute)
+        context = _auth_request.get()
+        if context is None or not context.active:
+            raise AttributeError(
+                f"{type(self).__name__} has no attribute {attribute!r} outside a request; "
+                "use the AuthManager's guard() there."
+            )
+        return getattr(context.manager.guard(self.name), attribute)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, GuardDependency) and other.name == self.name
+
+    def __hash__(self) -> int:
+        return hash((GuardDependency, self.name))
+
+    def __repr__(self) -> str:
+        return f"GuardDependency({self.name!r})"
+
+
 def require_scopes(*scopes: str, mode: str = "all") -> Callable[..., AuthContext]:
     """Dependency factory enforcing token abilities (Passport-style scopes).
 

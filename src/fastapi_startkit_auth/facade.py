@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import Depends, Request
 
-from .dependencies import _bearer_token, get_auth_manager, resolve_context
+from .dependencies import GuardDependency, _bearer_token, get_auth_manager, resolve_context
 from .concurrency import call, ensure_sync
 from .exceptions import AuthException
 from .guards.session import AsyncSessionGuard, SessionGuard
@@ -12,6 +12,15 @@ from .manager import AuthManager
 from .providers.base import user_is_active, user_is_active_async
 from .scoped_method import ScopedMethod
 from .sessions.models import SessionRecord
+
+
+class GuardAccessor:
+    """``Auth.guard(name)`` is a FastAPI dependency; ``auth.guard(name)`` on an instance is the guard itself."""
+
+    def __get__(self, instance: Any, owner: type) -> Any:
+        if instance is None:
+            return GuardDependency
+        return instance._manager.guard
 
 
 class Auth:
@@ -43,9 +52,7 @@ class Auth:
         """FastAPI dependency: ``auth: Auth = Depends(Auth.scoped)``."""
         return cls(manager, request)
 
-    @ScopedMethod
-    def guard(self, name: str | None = None) -> Any:
-        return self._manager.guard(name)
+    guard = GuardAccessor()
 
     @ScopedMethod
     def login(self, user_or_id: Any, guard: str | None = None) -> SessionRecord:
@@ -135,9 +142,7 @@ class AsyncAuth:
     def scoped(cls, request: Request, manager: AuthManager = Depends(get_auth_manager)) -> "AsyncAuth":
         return cls(manager, request)
 
-    @ScopedMethod
-    def guard(self, name: str | None = None) -> Any:
-        return self._manager.guard(name)
+    guard = GuardAccessor()
 
     @ScopedMethod
     async def login(self, user_or_id: Any, guard: str | None = None) -> SessionRecord:

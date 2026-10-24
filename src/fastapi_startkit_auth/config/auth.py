@@ -28,6 +28,7 @@ class SessionGuard:
 class OAuth2Guard:
     provider: str = "users"
     audience: str | None = None
+    first_party_only: bool = False
     driver: Literal["oauth2"] = "oauth2"
 
 
@@ -35,6 +36,14 @@ class OAuth2Guard:
 class ApiTokenGuard:
     provider: str = "users"
     driver: Literal["token"] = "token"
+
+
+@dataclass
+class ChainGuard:
+    """Authenticates through the first of ``guards`` (guard names) that accepts the request."""
+
+    guards: list[str] = field(default_factory=list)
+    driver: Literal["chain"] = "chain"
 
 
 @dataclass

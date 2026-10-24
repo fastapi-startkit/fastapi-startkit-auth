@@ -90,6 +90,18 @@ Each item lists what changed and what to do.
   `revoke_token_chain`, and `store_refresh_token` takes `family_id`.
 - Error responses carry `Cache-Control: no-store`; `invalid_client` challenges
   with `WWW-Authenticate: Basic`.
+- **Class-level `Auth.guard(name)` is a FastAPI dependency.**
+  `Auth.guard(name)` / `AsyncAuth.guard(name)` on the class now returns a
+  `GuardDependency`: `user = Depends(Auth.guard("api"))` resolves the user
+  through that guard and raises 401 otherwise, and equal names compare equal,
+  so `app.dependency_overrides[Auth.guard("api")]` works. Inside a request,
+  attribute access (`provider`, `user_from_token`, `authenticate`, ...) still
+  reaches the named guard, but the value is no longer the guard object itself,
+  so identity and `isinstance` checks fail, and outside a request attributes
+  raise `AttributeError`. On an instance (`auth.guard(name)` from
+  `Depends(Auth.scoped)`) it still returns the guard. *Migrate:* where you need
+  the guard object, use `auth.guard(name)` from `Depends(Auth.scoped)` or
+  `manager.guard(name)`.
 
 ### Migrations
 
@@ -104,6 +116,18 @@ using the ORM stores:
 
 ### Added
 
+- `ChainGuard(guards=[...])` (`{"driver": "chain"}`): authenticates through the
+  first member guard that accepts the request, e.g. a bearer token backed by
+  the browser session. A token the request presents is final for every member
+  type (oauth2 bearer, or an API token in `Authorization` or a custom header):
+  when the member that reads it rejects it, the chain fails instead of trying
+  the session. `user_from_token` skips session members.
+- `OAuth2Guard(first_party_only=True)` refuses access tokens issued to an OAuth
+  client (`client_id` set), so a first-party API accepts only the
+  application's own login and personal tokens.
+- `AuthManager.on_authenticated(listener)`: `listener(request, user, guard)`
+  runs whenever a guard dependency resolves a user, before the route handler,
+  for activity tracking or request-scoped state.
 - Refresh token families with reuse detection: replaying a rotated refresh token
   revokes the whole family, whoever presents it: the owning client, another
   authenticated client, or no client at all for unbound password-grant tokens.

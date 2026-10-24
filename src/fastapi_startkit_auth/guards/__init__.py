@@ -1,3 +1,4 @@
+from .chain import AsyncChainGuard, ChainGuard
 from .guard import AsyncPassportGuard, AuthContext, Guard, PassportGuard
 from .session import AsyncSessionGuard, SessionGuard
 from .token import AsyncTokenGuard, TokenGuard
@@ -11,4 +12,6 @@ __all__ = [
     "AsyncPassportGuard",
     "AsyncSessionGuard",
     "AsyncTokenGuard",
+    "ChainGuard",
+    "AsyncChainGuard",
 ]

@@ -23,6 +23,7 @@ from .grants.authorization_code import AsyncAuthorizationCodeGrant, Authorizatio
 from .grants.client_credentials import AsyncClientCredentialsGrant, ClientCredentialsGrant
 from .grants.password import AsyncPasswordGrant, PasswordGrant
 from .grants.refresh import AsyncRefreshTokenGrant, RefreshTokenGrant
+from .guards.chain import AsyncChainGuard, ChainGuard, guard_is_async
 from .guards.guard import AsyncPassportGuard, Guard, PassportGuard
 from .guards.session import AsyncSessionGuard, SessionGuard
 from .guards.token import AsyncTokenGuard, TokenGuard
@@ -39,6 +40,7 @@ from .tokens.repository import InMemoryTokenRepository
 from .tokens.service import AsyncTokenService, TokenService
 
 GuardFactory = Callable[[str, dict[str, Any]], Guard]
+AuthenticatedListener = Callable[[Any, Any, str | None], Any]
 
 FEATURE_PROVIDERS = {
     "session": "AuthSessionProvider",
@@ -89,7 +91,7 @@ class AuthManager:
         self._brokers: dict[str, PasswordBroker | AsyncPasswordBroker] = {
             name: self._build_broker(spec) for name, spec in cfg.get("passwords", {}).items()
         }
-        self._guard_drivers: dict[str, GuardFactory] = {}
+        self._guard_drivers: dict[str, GuardFactory] = {"chain": self._build_chain_guard}
         self._guards: dict[str, Guard] | None = None
         self._session_config: SessionConfig | None = None
         self._session_store: SessionStore | None = None
@@ -97,6 +99,7 @@ class AuthManager:
         self._api_token_config: ApiTokenConfig | None = None
         self._api_tokens: ApiTokenManager | AsyncApiTokenManager | None = None
         self.csrf_exempt_paths: list[str] = []
+        self._authenticated_listeners: list[AuthenticatedListener] = []
 
     @property
     def config(self) -> type[AuthConfig]:
@@ -215,6 +218,21 @@ class AuthManager:
                     f"ApiTokenConfig.session_guard {name!r} must name a session guard in AuthConfig.guards."
                 )
 
+    # --- events ---------------------------------------------------------
+    def on_authenticated(self, listener: AuthenticatedListener) -> AuthenticatedListener:
+        """Call ``listener(request, user, guard)`` whenever a guard dependency resolves a user.
+
+        Runs before the route handler, so listeners can record activity or put
+        request-scoped state in place. Async listeners are awaited; sync ones
+        run in the threadpool.
+        """
+        self._authenticated_listeners.append(listener)
+        return listener
+
+    async def authenticated(self, request: Any, user: Any, guard: str | None) -> None:
+        for listener in self._authenticated_listeners:
+            await call(listener, request, user, guard)
+
     # --- guards ---------------------------------------------------------
     def register_guard_driver(self, driver: str, factory: GuardFactory) -> None:
         """Register a factory that builds guards for a config ``driver`` key.
@@ -249,7 +267,13 @@ class AuthManager:
                 stacklevel=2,
             )
         guard_class = AsyncPassportGuard if is_async_provider(provider) or self._tokens_async() else PassportGuard
-        return guard_class(name=name, token_service=self.token_service, provider=provider, audience=audience)
+        return guard_class(
+            name=name,
+            token_service=self.token_service,
+            provider=provider,
+            audience=audience,
+            first_party_only=bool(spec.get("first_party_only", False)),
+        )
 
     def _build_session_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
@@ -281,6 +305,18 @@ class AuthManager:
             header=config.header,
             session_guard=(lambda: self.guard(session_guard)) if session_guard else None,
         )
+
+    def _build_chain_guard(self, name: str, spec: dict[str, Any]) -> Guard:
+        members = []
+        for member in spec.get("guards", []):
+            member_spec = self._guard_specs.get(member)
+            if member_spec is None:
+                raise ValueError(f"Chain guard {name!r} lists {member!r}, which AuthConfig.guards does not define.")
+            if member_spec["driver"] == "chain":
+                raise ValueError(f"Chain guard {name!r} cannot include the chain guard {member!r}.")
+            members.append(self._build_guard(member, member_spec))
+        guard_class = AsyncChainGuard if any(guard_is_async(member) for member in members) else ChainGuard
+        return guard_class(name=name, guards=members)
 
     def guard(self, name: str | None = None) -> Guard:
         name = name or self.default_guard_name()
