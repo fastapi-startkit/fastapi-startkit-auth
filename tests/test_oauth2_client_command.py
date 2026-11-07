@@ -17,7 +17,7 @@ from fastapi_startkit_auth.commands.oauth2_client import OAuth2ClientCommand  # 
 
 
 @pytest.fixture
-async def client_database(tmp_path):
+def client_database(tmp_path):
     from fastapi_startkit.application import Application as StartkitApplication
     from fastapi_startkit.masoniteorm import Migrator, Model
     from fastapi_startkit.masoniteorm.connections.factory import ConnectionFactory
@@ -34,7 +34,7 @@ async def client_database(tmp_path):
         await migrator.create_table_if_not_exists()
         await migrator.fresh(ignore_fk=True)
 
-    asyncio.run(await migrate())
+    asyncio.run(migrate())
     yield manager
     asyncio.run(manager.clear())
 
@@ -69,19 +69,19 @@ def test_public_client_persists_without_secret(client_database):
     assert "Client secret:" not in tester.io.fetch_output()
 
 
-async def test_first_party_secret_is_hashed_and_existing_clients_preserved(client_database):
+def test_first_party_secret_is_hashed_and_existing_clients_preserved(client_database):
     tester, manager = create_command()
     assert tester.execute("--name=Server --redirect-uri=https://server.example/callback") == 0
     secret = tester.io.fetch_output().split("Client secret: ")[1].splitlines()[0]
     client = asyncio.run(manager.client_repository.all())[0]
     assert client.confidential
     assert client.secret != secret
-    assert asyncio.run(await manager.client_repository.authenticate(client.id, secret)) == client
+    assert asyncio.run(manager.client_repository.authenticate(client.id, secret)) == client
     tester, second = create_command()
     assert tester.execute("--public --name=Browser --redirect-uri=https://browser.example/callback") == 0
     assert len(asyncio.run(second.client_repository.all())) == 2
-    assert asyncio.run(await second.client_repository.authenticate(client.id, secret)) == client
-    assert asyncio.run(await second.client_repository.authenticate(client.id, "wrong")) is None
+    assert asyncio.run(second.client_repository.authenticate(client.id, secret)) == client
+    assert asyncio.run(second.client_repository.authenticate(client.id, "wrong")) is None
 
 
 def test_invalid_redirect_creates_no_client(client_database):

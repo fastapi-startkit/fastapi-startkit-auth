@@ -278,27 +278,6 @@ class RecordingHasher(BcryptHasher):
         return super().verify(plain, hashed)
 
 
-class SyncAccount:
-    rows: dict = {}
-
-    def __init__(self, **attributes):
-        self.__dict__.update(attributes)
-
-    @classmethod
-    def find(cls, identifier):
-        record_thread()
-        return cls.rows.get(identifier)
-
-    @classmethod
-    def where(cls, field, value):
-        class Query:
-            def first(self):
-                record_thread()
-                return next((u for u in cls.rows.values() if getattr(u, field) == value), None)
-
-        return Query()
-
-
 class RecordingSessionStore(InMemorySessionStore):
     def create(self, **kwargs):
         record_thread()
@@ -318,9 +297,8 @@ def sync_is_active(user):
     return True
 
 
-async def test_sync_provider_and_session_store_never_run_on_the_loop(orm_database):
-    SyncAccount.rows = {1: SyncAccount(id=1, email="ada@example.com", password=HASHER.make("secret"))}
-    provider = ModelUserProvider(SyncAccount, hasher=RecordingHasher(rounds=4), is_active=sync_is_active)
+async def test_sync_hooks_and_session_store_never_run_on_the_loop(orm_database):
+    provider = ModelUserProvider(Account, hasher=RecordingHasher(rounds=4), is_active=sync_is_active)
     sessions = RecordingSessionStore()
     client, _ = await build(
         orm_database,

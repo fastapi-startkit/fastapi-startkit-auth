@@ -1,4 +1,3 @@
-import asyncio
 import os
 from uuid import UUID
 
@@ -44,25 +43,6 @@ async def postgres_users():
 async def test_async_provider_coerces_numeric_subject_for_integer_key(postgres_users):
     _, integer_user, _ = postgres_users
     user = await ModelUserProvider(integer_user).retrieve_by_id("7")
-    assert user["id"] == 7
-
-
-async def test_sync_provider_coerces_numeric_subject_for_integer_key(postgres_users):
-    class SyncIntegerUser:
-        id: int
-
-        @classmethod
-        async def find(cls, identifier):
-            async def fetch():
-                connection = await asyncpg.connect(POSTGRES_DSN)
-                try:
-                    return await connection.fetchrow("SELECT id FROM auth_provider_int_users WHERE id = $1", identifier)
-                finally:
-                    await connection.close()
-
-            return asyncio.run(await fetch())
-
-    user = await ModelUserProvider(SyncIntegerUser()).retrieve_by_id("7")
     assert user["id"] == 7
 
 

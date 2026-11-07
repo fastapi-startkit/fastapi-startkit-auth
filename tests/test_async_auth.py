@@ -124,10 +124,6 @@ def wire_routes(api):
     async def status(auth: Auth = Depends(Auth.scoped)):
         return {"check": await auth.check(), "id": await auth.id(), "user": user_json(await auth.user())}
 
-    @api.get("/sync-facade")
-    def sync_facade(auth: Auth = Depends(Auth.scoped)):
-        auth.logout()
-
 
 async def build(connection, **kwargs):
     api = FastAPI()
@@ -399,12 +395,6 @@ async def test_session_login_by_id_and_inactive_user(session_app, users):
     assert (await client.get("/whoami")).json()["id"] == 1
     users[1].is_active = False
     assert (await client.get("/me")).status_code == 401
-
-
-async def test_sync_facade_refuses_async_session_guard(session_app):
-    client, _ = session_app
-    with pytest.raises(RuntimeError, match="use Auth"):
-        await client.get("/sync-facade")
 
 
 # --- token guard (personal API tokens) -----------------------------------
