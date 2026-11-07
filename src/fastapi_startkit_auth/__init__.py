@@ -79,7 +79,7 @@ from .sessions.models import SessionRecord
 from .sessions.store import InMemorySessionStore, SessionStore
 from .tokens.service import TokenService
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = (
     "AuthConfig",
