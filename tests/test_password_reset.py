@@ -31,58 +31,58 @@ def make_broker(users, hasher, **kw):
     )
 
 
-def test_send_reset_link_returns_token(users, hasher):
+async def test_send_reset_link_returns_token(users, hasher):
     broker = make_broker(users, hasher)
-    token = broker.send_reset_link("ada@example.com")
+    token = await broker.send_reset_link("ada@example.com")
     assert isinstance(token, str) and token
 
 
-def test_send_reset_link_unknown_email_raises(users, hasher):
+async def test_send_reset_link_unknown_email_raises(users, hasher):
     broker = make_broker(users, hasher)
     with pytest.raises(InvalidGrantException):
-        broker.send_reset_link("ghost@example.com")
+        await broker.send_reset_link("ghost@example.com")
 
 
-def test_reset_changes_password(users, hasher):
+async def test_reset_changes_password(users, hasher):
     broker = make_broker(users, hasher)
-    token = broker.send_reset_link("ada@example.com")
-    assert broker.reset("ada@example.com", token, "new-password") is True
-    assert users.validate_credentials(users.retrieve_by_id(1), {"password": "new-password"}) is True
-    assert users.validate_credentials(users.retrieve_by_id(1), {"password": "old-password"}) is False
+    token = await broker.send_reset_link("ada@example.com")
+    assert await broker.reset("ada@example.com", token, "new-password") is True
+    assert await users.validate_credentials(await users.retrieve_by_id(1), {"password": "new-password"}) is True
+    assert await users.validate_credentials(await users.retrieve_by_id(1), {"password": "old-password"}) is False
 
 
-def test_reset_with_wrong_token_fails(users, hasher):
+async def test_reset_with_wrong_token_fails(users, hasher):
     broker = make_broker(users, hasher)
-    broker.send_reset_link("ada@example.com")
+    await broker.send_reset_link("ada@example.com")
     with pytest.raises(InvalidGrantException):
-        broker.reset("ada@example.com", "not-the-token", "new-password")
+        await broker.reset("ada@example.com", "not-the-token", "new-password")
 
 
-def test_reset_token_is_single_use(users, hasher):
+async def test_reset_token_is_single_use(users, hasher):
     broker = make_broker(users, hasher)
-    token = broker.send_reset_link("ada@example.com")
-    broker.reset("ada@example.com", token, "new-password")
+    token = await broker.send_reset_link("ada@example.com")
+    await broker.reset("ada@example.com", token, "new-password")
     with pytest.raises(InvalidGrantException):
-        broker.reset("ada@example.com", token, "another-password")
+        await broker.reset("ada@example.com", token, "another-password")
 
 
-def test_expired_token_is_rejected(users, hasher):
+async def test_expired_token_is_rejected(users, hasher):
     broker = make_broker(users, hasher, expire_minutes=0)
-    token = broker.send_reset_link("ada@example.com")
+    token = await broker.send_reset_link("ada@example.com")
     time.sleep(0.01)
     with pytest.raises(InvalidGrantException):
-        broker.reset("ada@example.com", token, "new-password")
+        await broker.reset("ada@example.com", token, "new-password")
 
 
-def test_throttle_blocks_rapid_requests(users, hasher):
+async def test_throttle_blocks_rapid_requests(users, hasher):
     broker = make_broker(users, hasher, throttle_seconds=60)
-    broker.send_reset_link("ada@example.com")
+    await broker.send_reset_link("ada@example.com")
     with pytest.raises(ThrottleException):
-        broker.send_reset_link("ada@example.com")
+        await broker.send_reset_link("ada@example.com")
 
 
-def test_throttle_allows_after_window(users, hasher):
+async def test_throttle_allows_after_window(users, hasher):
     broker = make_broker(users, hasher, throttle_seconds=0)
-    broker.send_reset_link("ada@example.com")
+    await broker.send_reset_link("ada@example.com")
     # zero throttle window: a second request is permitted immediately
-    assert broker.send_reset_link("ada@example.com")
+    assert await broker.send_reset_link("ada@example.com")

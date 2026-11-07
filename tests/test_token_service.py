@@ -19,96 +19,96 @@ def make_service(**kw):
     )
 
 
-def test_issue_access_token_returns_jwt_and_metadata():
+async def test_issue_access_token_returns_jwt_and_metadata():
     svc = make_service()
-    issued = svc.issue(user_id=1, client_id="c1", scopes=["read", "write"])
+    issued = await svc.issue(user_id=1, client_id="c1", scopes=["read", "write"])
     assert issued.token_type == "Bearer"
     assert issued.expires_in == 3600
     assert issued.scopes == ["read", "write"]
-    claims = svc.authenticate(issued.access_token)
+    claims = await svc.authenticate(issued.access_token)
     assert claims["sub"] == "1"
     assert claims["scopes"] == ["read", "write"]
 
 
-def test_issue_with_refresh_token():
+async def test_issue_with_refresh_token():
     svc = make_service()
-    issued = svc.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
+    issued = await svc.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
     assert issued.refresh_token is not None
 
 
-def test_authenticate_rejects_revoked_access_token():
+async def test_authenticate_rejects_revoked_access_token():
     svc = make_service()
-    issued = svc.issue(user_id=1, client_id="c1", scopes=["read"])
-    claims = svc.authenticate(issued.access_token)
-    svc.revoke_access(claims["jti"])
+    issued = await svc.issue(user_id=1, client_id="c1", scopes=["read"])
+    claims = await svc.authenticate(issued.access_token)
+    await svc.revoke_access(claims["jti"])
     with pytest.raises(InvalidTokenException):
-        svc.authenticate(issued.access_token)
+        await svc.authenticate(issued.access_token)
 
 
-def test_refresh_rotates_and_revokes_old_tokens():
+async def test_refresh_rotates_and_revokes_old_tokens():
     svc = make_service()
-    issued = svc.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
-    old_claims = svc.authenticate(issued.access_token)
+    issued = await svc.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
+    old_claims = await svc.authenticate(issued.access_token)
 
-    rotated = svc.refresh(issued.refresh_token)
+    rotated = await svc.refresh(issued.refresh_token)
     assert rotated.refresh_token != issued.refresh_token
 
     # old access token is now revoked
     with pytest.raises(InvalidTokenException):
-        svc.authenticate(issued.access_token)
+        await svc.authenticate(issued.access_token)
     # new access token works
-    assert svc.authenticate(rotated.access_token)["sub"] == "1"
+    assert (await svc.authenticate(rotated.access_token))["sub"] == "1"
     # replaying the old refresh token fails and revokes the whole family
     with pytest.raises(InvalidGrantException):
-        svc.refresh(issued.refresh_token)
+        await svc.refresh(issued.refresh_token)
     with pytest.raises(InvalidTokenException):
-        svc.authenticate(rotated.access_token)
+        await svc.authenticate(rotated.access_token)
     with pytest.raises(InvalidGrantException):
-        svc.refresh(rotated.refresh_token)
+        await svc.refresh(rotated.refresh_token)
 
 
-def test_refresh_rejects_unknown_token():
+async def test_refresh_rejects_unknown_token():
     svc = make_service()
     with pytest.raises(InvalidGrantException):
-        svc.refresh("not-a-real-refresh-token")
+        await svc.refresh("not-a-real-refresh-token")
 
 
-def test_refresh_can_narrow_scopes():
+async def test_refresh_can_narrow_scopes():
     svc = make_service()
-    issued = svc.issue(user_id=1, client_id="c1", scopes=["read", "write"], with_refresh=True)
-    rotated = svc.refresh(issued.refresh_token, scopes=["read"])
+    issued = await svc.issue(user_id=1, client_id="c1", scopes=["read", "write"], with_refresh=True)
+    rotated = await svc.refresh(issued.refresh_token, scopes=["read"])
     assert rotated.scopes == ["read"]
 
 
-def test_refresh_cannot_widen_scopes():
+async def test_refresh_cannot_widen_scopes():
     svc = make_service()
-    issued = svc.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
+    issued = await svc.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
     with pytest.raises(InvalidGrantException):
-        svc.refresh(issued.refresh_token, scopes=["read", "admin"])
+        await svc.refresh(issued.refresh_token, scopes=["read", "admin"])
 
 
-def test_personal_access_token_is_long_lived_and_named():
+async def test_personal_access_token_is_long_lived_and_named():
     svc = make_service()
-    issued = svc.create_personal_access_token(user_id=7, name="ci-token", scopes=["read"])
+    issued = await svc.create_personal_access_token(user_id=7, name="ci-token", scopes=["read"])
     assert issued.expires_in == 100000
-    claims = svc.authenticate(issued.access_token)
+    claims = await svc.authenticate(issued.access_token)
     record = svc.repository.find_access_token(claims["jti"])
     assert record.personal_access is True
     assert record.name == "ci-token"
 
 
-def test_introspect_active_and_inactive():
+async def test_introspect_active_and_inactive():
     svc = make_service()
-    issued = svc.issue(user_id=1, client_id="c1", scopes=["read"])
-    data = svc.introspect(issued.access_token)
+    issued = await svc.issue(user_id=1, client_id="c1", scopes=["read"])
+    data = await svc.introspect(issued.access_token)
     assert data["active"] is True
     assert data["scope"] == "read"
     assert data["sub"] == "1"
 
-    svc.revoke_access(svc.authenticate(issued.access_token)["jti"])
-    assert svc.introspect(issued.access_token) == {"active": False}
+    await svc.revoke_access((await svc.authenticate(issued.access_token))["jti"])
+    assert await svc.introspect(issued.access_token) == {"active": False}
 
 
-def test_introspect_garbage_token_is_inactive():
+async def test_introspect_garbage_token_is_inactive():
     svc = make_service()
-    assert svc.introspect("garbage") == {"active": False}
+    assert await svc.introspect("garbage") == {"active": False}

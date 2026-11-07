@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from ..concurrency import call, ensure_sync
+from ..concurrency import call
 from ..exceptions import InvalidGrantException
-from ..providers.base import active_user, active_user_async
-from ..tokens.service import IssuedToken, TokenService
+from ..providers.base import active_user
+from ..tokens.service import IssuedToken
 
 INACTIVE_OWNER = "The resource owner no longer exists or is not active."
 
@@ -24,50 +24,17 @@ def owner_resolver(user_provider: Any, owner_provider: OwnerProviderResolver | N
     return lambda client_id: user_provider
 
 
-def ensure_owner_active(provider: Any, user_id: Any) -> None:
-    if provider is not None and user_id is not None and active_user(provider, user_id) is None:
-        raise InvalidGrantException(INACTIVE_OWNER)
-
-
 def ensure_issued_to(record: Any, client_id: str | None) -> None:
     if record.client_id != client_id:
         raise InvalidGrantException("The refresh token was not issued to this client.")
 
 
-async def ensure_owner_active_async(provider: Any, user_id: Any) -> None:
-    if provider is not None and user_id is not None and await active_user_async(provider, user_id) is None:
+async def ensure_owner_active(provider: Any, user_id: Any) -> None:
+    if provider is not None and user_id is not None and await active_user(provider, user_id) is None:
         raise InvalidGrantException(INACTIVE_OWNER)
 
 
 class RefreshTokenGrant:
-    """Refresh-token grant (RFC 6749 §6) with rotation handled by TokenService."""
-
-    def __init__(
-        self,
-        token_service: TokenService,
-        user_provider: Any = None,
-        owner_provider: OwnerProviderResolver | None = None,
-    ) -> None:
-        self._tokens = token_service
-        self._owner_provider = owner_resolver(user_provider, owner_provider)
-
-    def handle(
-        self,
-        *,
-        refresh_token: str,
-        scopes: list[str] | None,
-        resource: str | None = None,
-        client_id: str | None = None,
-    ) -> IssuedToken:
-        record = ensure_sync(self._tokens.repository.find_refresh_token(refresh_token), "find_refresh_token")
-        # A used token must reach TokenService.refresh, whose reuse detection revokes its family whoever presents it.
-        if record is not None and record.active:
-            ensure_issued_to(record, client_id)
-            ensure_owner_active(self._owner_provider(record.client_id), record.user_id)
-        return self._tokens.refresh(refresh_token, scopes=scopes, resource=resource, client_id=client_id)
-
-
-class AsyncRefreshTokenGrant:
     def __init__(
         self,
         token_service: Any,
@@ -88,5 +55,5 @@ class AsyncRefreshTokenGrant:
         record = await call(self._tokens.repository.find_refresh_token, refresh_token)
         if record is not None and record.active:
             ensure_issued_to(record, client_id)
-            await ensure_owner_active_async(await call(self._owner_provider, record.client_id), record.user_id)
+            await ensure_owner_active(await call(self._owner_provider, record.client_id), record.user_id)
         return await call(self._tokens.refresh, refresh_token, scopes=scopes, resource=resource, client_id=client_id)

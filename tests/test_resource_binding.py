@@ -6,13 +6,13 @@ from fastapi_startkit_auth import AuthConfig, GrantPolicy
 from fastapi_startkit_auth.clients.models import Client
 from fastapi_startkit_auth.exceptions import InvalidGrantException, InvalidRequestException, InvalidScopeException, InvalidTargetException, InvalidTokenException
 from fastapi_startkit_auth.grants.authorization_code import AuthorizationCodeGrant
-from fastapi_startkit_auth.grants.refresh import AsyncRefreshTokenGrant, RefreshTokenGrant
-from fastapi_startkit_auth.guards.guard import AsyncPassportGuard
+from fastapi_startkit_auth.grants.refresh import RefreshTokenGrant
+from fastapi_startkit_auth.guards.guard import PassportGuard
 from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 from fastapi_startkit_auth.security.jwt import JWTEncoder
 from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
-from fastapi_startkit_auth.tokens.service import AsyncTokenService, TokenService
+from fastapi_startkit_auth.tokens.service import TokenService
 
 from conftest import PASSWORD_GRANTS, auth_manager, oauth2_config, register_auth
 
@@ -69,8 +69,8 @@ def spa():
     return Client(id="spa", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
 
 
-def _code(manager, client, s256, resource=MCP, scopes=("read",)):
-    return manager.authorization_code_grant().issue_code(
+async def _code(manager, client, s256, resource=MCP, scopes=("read",)):
+    return await manager.authorization_code_grant().issue_code(
         client=client,
         user_id=1,
         scopes=list(scopes),
@@ -81,56 +81,56 @@ def _code(manager, client, s256, resource=MCP, scopes=("read",)):
     )
 
 
-def _exchange(manager, client, code, resource=MCP):
-    return manager.authorization_code_grant().handle(
+async def _exchange(manager, client, code, resource=MCP):
+    return await manager.authorization_code_grant().handle(
         client=client, code=code, redirect_uri="https://spa/cb", code_verifier=VERIFIER, resource=resource
     )
 
 
-def test_code_exchange_binds_the_token_to_the_resource(manager, spa, s256):
-    issued = _exchange(manager, spa, _code(manager, spa, s256))
+async def test_code_exchange_binds_the_token_to_the_resource(manager, spa, s256):
+    issued = await _exchange(manager, spa, await _code(manager, spa, s256))
 
-    claims = manager.guard("mcp").user_from_token(issued.access_token)
+    claims = await manager.guard("mcp").user_from_token(issued.access_token)
     assert claims.user["id"] == 1
-    assert manager.token_service.introspect(issued.access_token)["aud"] == MCP
-    assert manager.token_service.introspect(issued.access_token)["iss"] == "https://auth.example.com"
+    assert (await manager.token_service.introspect(issued.access_token))["aud"] == MCP
+    assert (await manager.token_service.introspect(issued.access_token))["iss"] == "https://auth.example.com"
 
 
-def test_resource_bound_token_is_rejected_by_a_guard_without_that_audience(manager, spa, s256):
-    issued = _exchange(manager, spa, _code(manager, spa, s256))
+async def test_resource_bound_token_is_rejected_by_a_guard_without_that_audience(manager, spa, s256):
+    issued = await _exchange(manager, spa, await _code(manager, spa, s256))
 
     with pytest.raises(InvalidTokenException):
-        manager.guard("api").user_from_token(issued.access_token)
+        await manager.guard("api").user_from_token(issued.access_token)
 
 
-def test_unbound_token_is_rejected_by_the_audience_guard(manager):
-    issued = manager.token_service.issue(user_id=1, client_id="c1", scopes=["read"])
+async def test_unbound_token_is_rejected_by_the_audience_guard(manager):
+    issued = await manager.token_service.issue(user_id=1, client_id="c1", scopes=["read"])
 
-    assert manager.guard("api").user_from_token(issued.access_token).user["id"] == 1
+    assert (await manager.guard("api").user_from_token(issued.access_token)).user["id"] == 1
     with pytest.raises(InvalidTokenException):
-        manager.guard("mcp").user_from_token(issued.access_token)
+        await manager.guard("mcp").user_from_token(issued.access_token)
 
 
-def test_unknown_resource_is_refused(manager, spa, s256):
+async def test_unknown_resource_is_refused(manager, spa, s256):
     with pytest.raises(InvalidTargetException):
-        _code(manager, spa, s256, resource="https://evil.example.com/mcp")
+        await _code(manager, spa, s256, resource="https://evil.example.com/mcp")
 
 
-def test_exchange_with_a_different_resource_is_refused(manager, spa, s256):
-    code = _code(manager, spa, s256)
+async def test_exchange_with_a_different_resource_is_refused(manager, spa, s256):
+    code = await _code(manager, spa, s256)
 
     with pytest.raises(InvalidTargetException):
-        _exchange(manager, spa, code, resource="https://other.example.com")
+        await _exchange(manager, spa, code, resource="https://other.example.com")
 
 
-def test_unknown_scope_is_refused(manager, spa, s256):
+async def test_unknown_scope_is_refused(manager, spa, s256):
     with pytest.raises(InvalidScopeException):
-        _code(manager, spa, s256, scopes=("read", "admin"))
+        await _code(manager, spa, s256, scopes=("read", "admin"))
 
 
-def test_plain_pkce_is_refused_when_only_s256_is_allowed(manager, spa):
+async def test_plain_pkce_is_refused_when_only_s256_is_allowed(manager, spa):
     with pytest.raises(InvalidRequestException):
-        manager.authorization_code_grant().issue_code(
+        await manager.authorization_code_grant().issue_code(
             client=spa,
             user_id=1,
             scopes=["read"],
@@ -140,34 +140,34 @@ def test_plain_pkce_is_refused_when_only_s256_is_allowed(manager, spa):
         )
 
 
-def test_refresh_keeps_the_audience(manager, spa, s256):
-    issued = _exchange(manager, spa, _code(manager, spa, s256))
+async def test_refresh_keeps_the_audience(manager, spa, s256):
+    issued = await _exchange(manager, spa, await _code(manager, spa, s256))
 
-    rotated = manager.refresh_grant().handle(refresh_token=issued.refresh_token, scopes=None, client_id=spa.id)
+    rotated = await manager.refresh_grant().handle(refresh_token=issued.refresh_token, scopes=None, client_id=spa.id)
 
-    assert manager.guard("mcp").user_from_token(rotated.access_token).user["id"] == 1
+    assert (await manager.guard("mcp").user_from_token(rotated.access_token)).user["id"] == 1
 
 
-def test_refresh_for_a_different_resource_is_refused(manager, spa, s256):
-    issued = _exchange(manager, spa, _code(manager, spa, s256))
+async def test_refresh_for_a_different_resource_is_refused(manager, spa, s256):
+    issued = await _exchange(manager, spa, await _code(manager, spa, s256))
 
     with pytest.raises(InvalidTargetException):
-        manager.refresh_grant().handle(
+        await manager.refresh_grant().handle(
             refresh_token=issued.refresh_token, scopes=None, resource="https://other", client_id=spa.id
         )
 
 
-def test_client_credentials_binds_the_resource(manager):
+async def test_client_credentials_binds_the_resource(manager):
     service = Client(id="svc", name="svc", confidential=True)
 
-    issued = manager.client_credentials_grant().handle(client=service, scopes=["content:write"], resource=MCP)
+    issued = await manager.client_credentials_grant().handle(client=service, scopes=["content:write"], resource=MCP)
 
-    assert manager.token_service.introspect(issued.access_token)["aud"] == MCP
+    assert (await manager.token_service.introspect(issued.access_token))["aud"] == MCP
 
 
-def test_password_grant_checks_the_scope_catalog(manager):
+async def test_password_grant_checks_the_scope_catalog(manager):
     with pytest.raises(InvalidScopeException):
-        manager.password_grant().handle(username="ada@example.com", password="secret", scopes=["admin"], client_id=None)
+        await manager.password_grant().handle(username="ada@example.com", password="secret", scopes=["admin"], client_id=None)
 
 
 def test_default_policy_allows_any_scope_and_no_resource():
@@ -180,7 +180,7 @@ def test_default_policy_allows_any_scope_and_no_resource():
         policy.check_resource(MCP)
 
 
-def test_token_endpoint_accepts_the_resource_parameter():
+async def test_token_endpoint_accepts_the_resource_parameter():
     client, manager = _app()
     registered, secret = manager.client_repository.register(
         name="svc", redirect_uris=[], grant_types=["client_credentials"]
@@ -197,7 +197,7 @@ def test_token_endpoint_accepts_the_resource_parameter():
         },
     )
     assert response.status_code == 200, response.text
-    assert manager.token_service.introspect(response.json()["access_token"])["aud"] == MCP
+    assert (await manager.token_service.introspect(response.json()["access_token"]))["aud"] == MCP
 
     refused = client.post(
         "/oauth/token",
@@ -219,12 +219,12 @@ def _users():
     return users
 
 
-def test_default_policy_accepts_lowercase_s256(s256):
+async def test_default_policy_accepts_lowercase_s256(s256):
     service = TokenService(encoder=JWTEncoder(secret=KEY))
     grant = AuthorizationCodeGrant(service)
     spa = Client(id="spa", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
 
-    code = grant.issue_code(
+    code = await grant.issue_code(
         client=spa,
         user_id=1,
         scopes=["read"],
@@ -233,13 +233,13 @@ def test_default_policy_accepts_lowercase_s256(s256):
         code_challenge_method="s256",
     )
 
-    issued = grant.handle(client=spa, code=code, redirect_uri="https://spa/cb", code_verifier=VERIFIER)
-    assert service.authenticate(issued.access_token)["sub"] == "1"
+    issued = await grant.handle(client=spa, code=code, redirect_uri="https://spa/cb", code_verifier=VERIFIER)
+    assert (await service.authenticate(issued.access_token))["sub"] == "1"
 
 
-def test_s256_only_refuses_a_challenge_without_method(manager, spa, s256):
+async def test_s256_only_refuses_a_challenge_without_method(manager, spa, s256):
     with pytest.raises(InvalidRequestException):
-        manager.authorization_code_grant().issue_code(
+        await manager.authorization_code_grant().issue_code(
             client=spa,
             user_id=1,
             scopes=["read"],
@@ -249,7 +249,7 @@ def test_s256_only_refuses_a_challenge_without_method(manager, spa, s256):
         )
 
 
-def test_require_pkce_applies_to_confidential_clients():
+async def test_require_pkce_applies_to_confidential_clients():
     confidential = Client(id="web", name="web", confidential=True, redirect_uris=["https://web/cb"])
     request = dict(
         client=confidential,
@@ -260,44 +260,44 @@ def test_require_pkce_applies_to_confidential_clients():
         code_challenge_method=None,
     )
 
-    assert _manager(require_pkce=False).authorization_code_grant().issue_code(**request)
+    assert await _manager(require_pkce=False).authorization_code_grant().issue_code(**request)
     with pytest.raises(InvalidRequestException):
-        _manager().authorization_code_grant().issue_code(**request)
+        await _manager().authorization_code_grant().issue_code(**request)
 
 
-def test_unbound_code_redeemed_with_a_resource_is_refused(manager, spa, s256):
-    code = _code(manager, spa, s256, resource=None)
+async def test_unbound_code_redeemed_with_a_resource_is_refused(manager, spa, s256):
+    code = await _code(manager, spa, s256, resource=None)
 
     with pytest.raises(InvalidTargetException):
-        _exchange(manager, spa, code, resource=MCP)
+        await _exchange(manager, spa, code, resource=MCP)
 
 
-def test_another_clients_code_fails_as_invalid_grant_before_the_resource_check(manager, spa, s256):
-    code = _code(manager, spa, s256)
+async def test_another_clients_code_fails_as_invalid_grant_before_the_resource_check(manager, spa, s256):
+    code = await _code(manager, spa, s256)
     thief = Client(id="thief", name="thief", confidential=False, redirect_uris=["https://spa/cb"])
 
     with pytest.raises(InvalidGrantException):
-        _exchange(manager, thief, code, resource="https://other.example.com")
+        await _exchange(manager, thief, code, resource="https://other.example.com")
 
 
-def test_guard_refuses_a_wrong_or_missing_issuer(manager):
+async def test_guard_refuses_a_wrong_or_missing_issuer(manager):
     for issuer in ("https://evil.example.com", None):
         foreign = TokenService(
             encoder=JWTEncoder(secret=KEY, issuer=issuer), repository=manager.token_repository
         )
-        issued = foreign.issue(user_id=1, client_id="c1", scopes=["read"])
+        issued = await foreign.issue(user_id=1, client_id="c1", scopes=["read"])
         with pytest.raises(InvalidTokenException):
-            manager.guard("api").user_from_token(issued.access_token)
+            await manager.guard("api").user_from_token(issued.access_token)
 
 
 async def test_async_service_and_guard_enforce_the_audience():
-    service = AsyncTokenService(
+    service = TokenService(
         encoder=JWTEncoder(secret=KEY, issuer="https://auth.example.com"),
         repository=InMemoryTokenRepository(),
     )
     users = _users()
-    mcp_guard = AsyncPassportGuard("mcp", service, users, audience=MCP)
-    api_guard = AsyncPassportGuard("api", service, users)
+    mcp_guard = PassportGuard("mcp", service, users, audience=MCP)
+    api_guard = PassportGuard("api", service, users)
 
     bound = await service.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True, audience=MCP)
     plain = await service.issue(user_id=1, client_id="c1", scopes=["read"])
@@ -321,7 +321,7 @@ def test_guard_audience_outside_resources_warns():
         _manager(resources=[]).guard("mcp")
 
 
-def test_authorize_exchange_and_refresh_over_http(s256):
+async def test_authorize_exchange_and_refresh_over_http(s256):
     client, manager = _app()
     spa, _ = manager.client_repository.register(name="spa", redirect_uris=["https://spa/cb"], confidential=False)
     login = client.post(
@@ -356,7 +356,7 @@ def test_authorize_exchange_and_refresh_over_http(s256):
         },
     )
     assert issued.status_code == 200, issued.text
-    assert manager.token_service.introspect(issued.json()["access_token"])["aud"] == MCP
+    assert (await manager.token_service.introspect(issued.json()["access_token"]))["aud"] == MCP
 
     refreshed = client.post(
         "/oauth/token",
@@ -368,7 +368,7 @@ def test_authorize_exchange_and_refresh_over_http(s256):
         },
     )
     assert refreshed.status_code == 200, refreshed.text
-    assert manager.token_service.introspect(refreshed.json()["access_token"])["aud"] == MCP
+    assert (await manager.token_service.introspect(refreshed.json()["access_token"]))["aud"] == MCP
 
 
 def test_repeated_resource_is_refused():
@@ -418,8 +418,8 @@ def test_refresh_over_http_is_bound_to_the_issuing_client():
 
 
 async def test_async_refresh_is_bound_to_the_issuing_client():
-    service = AsyncTokenService(encoder=JWTEncoder(secret=KEY), repository=InMemoryTokenRepository())
-    grant = AsyncRefreshTokenGrant(service)
+    service = TokenService(encoder=JWTEncoder(secret=KEY), repository=InMemoryTokenRepository())
+    grant = RefreshTokenGrant(service)
     issued = await service.issue(user_id=1, client_id="c1", scopes=["read"], with_refresh=True)
 
     with pytest.raises(InvalidGrantException):
@@ -428,24 +428,9 @@ async def test_async_refresh_is_bound_to_the_issuing_client():
 
 
 @pytest.mark.parametrize("bound_to, replayed_by", [("c1", "c2"), ("c1", None), (None, "c1")])
-def test_replaying_a_used_refresh_token_revokes_the_family_whoever_presents_it(bound_to, replayed_by):
+async def test_replaying_a_used_refresh_token_revokes_the_family_whoever_presents_it(bound_to, replayed_by):
     service = TokenService(encoder=JWTEncoder(secret=KEY), repository=InMemoryTokenRepository())
     grant = RefreshTokenGrant(service)
-    issued = service.issue(user_id=1, client_id=bound_to, scopes=["read"], with_refresh=True)
-    rotated = grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=bound_to)
-
-    with pytest.raises(InvalidGrantException):
-        grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=replayed_by)
-    with pytest.raises(InvalidTokenException):
-        service.authenticate(rotated.access_token)
-    with pytest.raises(InvalidGrantException):
-        grant.handle(refresh_token=rotated.refresh_token, scopes=None, client_id=bound_to)
-
-
-@pytest.mark.parametrize("bound_to, replayed_by", [("c1", "c2"), ("c1", None), (None, "c1")])
-async def test_async_replaying_a_used_refresh_token_revokes_the_family_whoever_presents_it(bound_to, replayed_by):
-    service = AsyncTokenService(encoder=JWTEncoder(secret=KEY), repository=InMemoryTokenRepository())
-    grant = AsyncRefreshTokenGrant(service)
     issued = await service.issue(user_id=1, client_id=bound_to, scopes=["read"], with_refresh=True)
     rotated = await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=bound_to)
 
@@ -457,7 +442,22 @@ async def test_async_replaying_a_used_refresh_token_revokes_the_family_whoever_p
         await grant.handle(refresh_token=rotated.refresh_token, scopes=None, client_id=bound_to)
 
 
-def test_empty_resource_is_treated_as_absent_under_the_default_config(s256):
+@pytest.mark.parametrize("bound_to, replayed_by", [("c1", "c2"), ("c1", None), (None, "c1")])
+async def test_async_replaying_a_used_refresh_token_revokes_the_family_whoever_presents_it(bound_to, replayed_by):
+    service = TokenService(encoder=JWTEncoder(secret=KEY), repository=InMemoryTokenRepository())
+    grant = RefreshTokenGrant(service)
+    issued = await service.issue(user_id=1, client_id=bound_to, scopes=["read"], with_refresh=True)
+    rotated = await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=bound_to)
+
+    with pytest.raises(InvalidGrantException):
+        await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=replayed_by)
+    with pytest.raises(InvalidTokenException):
+        await service.authenticate(rotated.access_token)
+    with pytest.raises(InvalidGrantException):
+        await grant.handle(refresh_token=rotated.refresh_token, scopes=None, client_id=bound_to)
+
+
+async def test_empty_resource_is_treated_as_absent_under_the_default_config(s256):
     users = _users()
 
     class Default(AuthConfig):
@@ -479,7 +479,7 @@ def test_empty_resource_is_treated_as_absent_under_the_default_config(s256):
         data={"grant_type": "client_credentials", "client_id": service.id, "client_secret": secret, "resource": ""},
     )
     assert issued.status_code == 200, issued.text
-    assert "aud" not in manager.token_service.introspect(issued.json()["access_token"])
+    assert "aud" not in await manager.token_service.introspect(issued.json()["access_token"])
 
     user_token = client.post(
         "/oauth/token", data={"grant_type": "password", "username": "ada@example.com", "password": "secret"}

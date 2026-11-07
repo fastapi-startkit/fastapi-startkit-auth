@@ -5,65 +5,10 @@ from typing import Any
 
 from fastapi import Request
 
-from ..apitokens.manager import ApiTokenManager
 from ..exceptions import AuthenticationException, InvalidTokenException
-from ..concurrency import call, ensure_sync
-from ..providers.base import UserProvider, user_is_active, user_is_active_async
+from ..concurrency import call
+from ..providers.base import user_is_active
 from .guard import AuthContext
-
-
-class TokenGuard:
-    """Opaque API-token guard (Sanctum-style).
-
-    Corresponds to a ``{"driver": "token"}`` guard entry. Resolves
-    ``Authorization: Bearer {id}|{secret}`` — or the raw token in a configured
-    custom header — through :class:`ApiTokenManager` and turns the record's
-    abilities into the ``AuthContext`` scopes, so ``require_scopes`` works
-    unchanged.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        tokens: ApiTokenManager,
-        provider: UserProvider,
-        header: str = "Authorization",
-        session_guard: Callable[[], Any] | None = None,
-    ) -> None:
-        self.name = name
-        self._tokens = tokens
-        self.provider = provider
-        self.header = header
-        self._session_guard = session_guard
-
-    def authenticate(self, request: Request) -> AuthContext:
-        """Resolve the SPA session (stateful mode) or the configured token header."""
-        if self._session_guard is not None:
-            try:
-                return self._session_guard().authenticate(request)
-            except AuthenticationException:
-                pass
-        token = self._extract(request)
-        if not token:
-            raise AuthenticationException("Not authenticated.")
-        return self.user_from_token(token)
-
-    def user_from_token(self, access_token: str) -> AuthContext:
-        record = ensure_sync(self._tokens.verify(access_token), "The API token manager's verify")
-        user = ensure_sync(self.provider.retrieve_by_id(record.user_id), "The user provider's retrieve_by_id")
-        if user is None:
-            # Orphaned token (user deleted): revoke it, fail generically.
-            ensure_sync(self._tokens.revoke(record.id), "The API token manager's revoke")
-            raise InvalidTokenException("The API token is invalid.")
-        if not user_is_active(self.provider, user):
-            raise InvalidTokenException("The API token is invalid.")
-        return AuthContext(user=user, scopes=list(record.abilities), jti=record.id)
-
-    def presented_token(self, request: Request) -> str | None:
-        return _extract_token(request, self.header) or None
-
-    def _extract(self, request: Request) -> str | None:
-        return _extract_token(request, self.header)
 
 
 def _extract_token(request: Request, header: str) -> str | None:
@@ -78,7 +23,7 @@ def _extract_token(request: Request, header: str) -> str | None:
     return raw.strip()
 
 
-class AsyncTokenGuard:
+class TokenGuard:
     def __init__(
         self,
         name: str,
@@ -113,6 +58,6 @@ class AsyncTokenGuard:
         if user is None:
             await call(self._tokens.revoke, record.id)
             raise InvalidTokenException("The API token is invalid.")
-        if not await user_is_active_async(self.provider, user):
+        if not await user_is_active(self.provider, user):
             raise InvalidTokenException("The API token is invalid.")
         return AuthContext(user=user, scopes=list(record.abilities), jti=record.id)

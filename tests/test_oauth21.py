@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 from urllib.parse import parse_qs, urlsplit
@@ -5,7 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from fastapi import FastAPI
 
-from fastapi_startkit_auth import AsyncAuth
+from fastapi_startkit_auth import Auth
 
 from conftest import BrowserTestClient as TestClient
 from conftest import oauth2_config, register_auth
@@ -28,7 +29,7 @@ def server():
 
     @api.post("/login")
     async def login():
-        await AsyncAuth.login(1)
+        await Auth.login(1)
         return {"authenticated": True}
 
     client = TestClient(api, base_url="https://server.example")
@@ -74,7 +75,7 @@ def exchange(client, registration, **overrides):
 
 
 @pytest.mark.parametrize("confidential", [False, True])
-def test_authorization_code_pkce_and_refresh(server, confidential):
+async def test_authorization_code_pkce_and_refresh(server, confidential):
     client, manager = server
     registration = register(manager, confidential=confidential)
     application, secret = registration
@@ -106,7 +107,7 @@ def test_authorization_code_pkce_and_refresh(server, confidential):
     assert issued.headers["cache-control"] == "no-store"
     assert issued.headers["pragma"] == "no-cache"
     assert issued.json()["scope"] == "read"
-    claims = manager.token_service.authenticate(issued.json()["access_token"])
+    claims = await manager.token_service.authenticate(issued.json()["access_token"])
     assert claims["sub"] == "1"
     assert claims["client_id"] == application.id
     assert client.post("/oauth/token", data=data).json()["error"] == "invalid_grant"
@@ -123,7 +124,7 @@ def test_authorization_code_pkce_and_refresh(server, confidential):
     assert client.post("/oauth/token", data=refresh).json()["error"] == "invalid_grant"
     descendant = {**refresh, "refresh_token": rotated.json()["refresh_token"]}
     assert client.post("/oauth/token", data=descendant).json()["error"] == "invalid_grant"
-    assert manager.token_service.introspect(rotated.json()["access_token"]) == {"active": False}
+    assert await manager.token_service.introspect(rotated.json()["access_token"]) == {"active": False}
 
 
 @pytest.mark.parametrize("confidential", [False, True])
@@ -176,7 +177,7 @@ def test_public_client_cannot_use_client_credentials(server):
     assert response.json()["error"] == "unauthorized_client"
 
 
-def test_client_credentials_supports_basic_auth_and_default_scopes(server):
+async def test_client_credentials_supports_basic_auth_and_default_scopes(server):
     client, manager = server
     application, secret = register(manager, confidential=True)
     response = client.post("/oauth/token", data={"grant_type": "client_credentials"}, auth=(application.id, secret))
@@ -184,7 +185,7 @@ def test_client_credentials_supports_basic_auth_and_default_scopes(server):
     body = response.json()
     assert body["scope"] == "read"
     assert "refresh_token" not in body
-    assert manager.token_service.authenticate(body["access_token"])["sub"] is None
+    assert (await manager.token_service.authenticate(body["access_token"]))["sub"] is None
 
 
 def test_refresh_is_bound_to_the_issuing_client(server):
@@ -364,29 +365,29 @@ def test_malformed_basic_authentication_is_rejected(server, header):
     assert response.json()["error"] == "invalid_client"
 
 
-def test_concurrent_refresh_cannot_issue_two_valid_token_chains(server):
-    from concurrent.futures import ThreadPoolExecutor
+async def test_concurrent_refresh_cannot_issue_two_valid_token_chains(server):
     from fastapi_startkit_auth.exceptions import InvalidGrantException
 
     _, manager = server
-    original = manager.token_service.issue(user_id=1, client_id="concurrent", scopes=["read"], with_refresh=True)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        attempts = [pool.submit(manager.token_service.refresh, original.refresh_token) for _ in range(2)]
-    issued = [attempt.result() for attempt in attempts if attempt.exception() is None]
-    errors = [attempt.exception() for attempt in attempts if attempt.exception() is not None]
+    original = await manager.token_service.issue(user_id=1, client_id="concurrent", scopes=["read"], with_refresh=True)
+    attempts = await asyncio.gather(
+        *(manager.token_service.refresh(original.refresh_token) for _ in range(2)), return_exceptions=True
+    )
+    issued = [attempt for attempt in attempts if not isinstance(attempt, BaseException)]
+    errors = [attempt for attempt in attempts if isinstance(attempt, BaseException)]
     assert len(issued) == 1
     assert len(errors) == 1
     assert isinstance(errors[0], InvalidGrantException)
-    assert manager.token_service.introspect(issued[0].access_token) == {"active": False}
+    assert await manager.token_service.introspect(issued[0].access_token) == {"active": False}
 
 
-def test_user_token_listing_does_not_expose_secrets_or_other_users(server):
+async def test_user_token_listing_does_not_expose_secrets_or_other_users(server):
     client, manager = server
     registration = register(manager)
     issued = exchange(client, registration).json()
-    own_jti = manager.token_service.authenticate(issued["access_token"])["jti"]
-    manager.token_service.issue(user_id=2, client_id=registration[0].id, scopes=["read"], with_refresh=True)
-    manager.token_service.create_personal_access_token(user_id=1, name="personal", scopes=["read"])
+    own_jti = (await manager.token_service.authenticate(issued["access_token"]))["jti"]
+    await manager.token_service.issue(user_id=2, client_id=registration[0].id, scopes=["read"], with_refresh=True)
+    await manager.token_service.create_personal_access_token(user_id=1, name="personal", scopes=["read"])
     response = client.get("/oauth/tokens")
     assert response.status_code == 200
     assert [record["jti"] for record in response.json()] == [own_jti]
@@ -398,68 +399,68 @@ def test_user_token_listing_does_not_expose_secrets_or_other_users(server):
     assert issued["refresh_token"] not in response.text
 
 
-def test_owner_revocation_invalidates_access_and_refresh(server):
+async def test_owner_revocation_invalidates_access_and_refresh(server):
     client, manager = server
     registration = register(manager)
     issued = exchange(client, registration).json()
-    jti = manager.token_service.authenticate(issued["access_token"])["jti"]
+    jti = (await manager.token_service.authenticate(issued["access_token"]))["jti"]
     assert client.delete(f"/oauth/tokens/{jti}").status_code == 204
-    assert manager.token_service.introspect(issued["access_token"]) == {"active": False}
-    assert manager.token_service.introspect(issued["refresh_token"]) == {"active": False}
+    assert await manager.token_service.introspect(issued["access_token"]) == {"active": False}
+    assert await manager.token_service.introspect(issued["refresh_token"]) == {"active": False}
     assert client.get("/oauth/tokens").json() == []
     assert client.delete(f"/oauth/tokens/{jti}").status_code == 204
 
 
-def test_token_management_cannot_revoke_another_users_tokens(server):
+async def test_token_management_cannot_revoke_another_users_tokens(server):
     client, manager = server
-    foreign = manager.token_service.issue(user_id=2, client_id="foreign", scopes=["read"], with_refresh=True)
+    foreign = await manager.token_service.issue(user_id=2, client_id="foreign", scopes=["read"], with_refresh=True)
     assert client.delete(f"/oauth/tokens/{foreign.jti}").status_code == 204
-    assert manager.token_service.introspect(foreign.access_token)["active"] is True
-    assert manager.token_service.introspect(foreign.refresh_token)["active"] is True
+    assert (await manager.token_service.introspect(foreign.access_token))["active"] is True
+    assert (await manager.token_service.introspect(foreign.refresh_token))["active"] is True
 
 
-def test_bulk_revocation_preserves_other_users_and_personal_tokens(server):
+async def test_bulk_revocation_preserves_other_users_and_personal_tokens(server):
     client, manager = server
-    first = manager.token_service.issue(user_id=1, client_id="first", scopes=["read"], with_refresh=True)
-    second = manager.token_service.issue(user_id=1, client_id="second", scopes=["write"], with_refresh=True)
-    foreign = manager.token_service.issue(user_id=2, client_id="foreign", scopes=["read"], with_refresh=True)
-    personal = manager.token_service.create_personal_access_token(user_id=1, name="personal", scopes=["read"])
+    first = await manager.token_service.issue(user_id=1, client_id="first", scopes=["read"], with_refresh=True)
+    second = await manager.token_service.issue(user_id=1, client_id="second", scopes=["write"], with_refresh=True)
+    foreign = await manager.token_service.issue(user_id=2, client_id="foreign", scopes=["read"], with_refresh=True)
+    personal = await manager.token_service.create_personal_access_token(user_id=1, name="personal", scopes=["read"])
     assert client.delete("/oauth/tokens").status_code == 204
     for token in [first, second]:
-        assert manager.token_service.introspect(token.access_token) == {"active": False}
-        assert manager.token_service.introspect(token.refresh_token) == {"active": False}
-    assert manager.token_service.introspect(foreign.access_token)["active"] is True
-    assert manager.token_service.introspect(personal.access_token)["active"] is True
+        assert await manager.token_service.introspect(token.access_token) == {"active": False}
+        assert await manager.token_service.introspect(token.refresh_token) == {"active": False}
+    assert (await manager.token_service.introspect(foreign.access_token))["active"] is True
+    assert (await manager.token_service.introspect(personal.access_token))["active"] is True
 
 
-def test_expired_access_token_can_still_revoke_its_refresh_chain(server):
+async def test_expired_access_token_can_still_revoke_its_refresh_chain(server):
     import time
 
     client, manager = server
-    issued = manager.token_service.issue(user_id=1, client_id="first", scopes=["read"], with_refresh=True)
+    issued = await manager.token_service.issue(user_id=1, client_id="first", scopes=["read"], with_refresh=True)
     manager.token_repository.find_access_token(issued.jti).expires_at = time.time() - 1
     manager.token_repository.purge_expired()
     listed = client.get("/oauth/tokens").json()
     assert listed[0]["jti"] == issued.jti
     assert listed[0]["active"] is False
     assert client.delete(f"/oauth/tokens/{issued.jti}").status_code == 204
-    assert manager.token_service.introspect(issued.refresh_token) == {"active": False}
+    assert await manager.token_service.introspect(issued.refresh_token) == {"active": False}
 
 
 @pytest.mark.parametrize("token_kind", ["access_token", "refresh_token"])
-def test_client_revocation_rejects_foreign_token_ownership(server, token_kind):
+async def test_client_revocation_rejects_foreign_token_ownership(server, token_kind):
     client, manager = server
     owner = register(manager, confidential=True)
     foreign, foreign_secret = register(manager, confidential=True)
     issued = exchange(client, owner).json()
     response = client.post("/oauth/revoke", data={"token": issued[token_kind]}, auth=(foreign.id, foreign_secret))
     assert response.status_code == 200
-    assert manager.token_service.introspect(issued["access_token"])["active"] is True
-    assert manager.token_service.introspect(issued["refresh_token"])["active"] is True
+    assert (await manager.token_service.introspect(issued["access_token"]))["active"] is True
+    assert (await manager.token_service.introspect(issued["refresh_token"]))["active"] is True
     response = client.post("/oauth/revoke", data={"token": issued[token_kind]}, auth=(owner[0].id, owner[1]))
     assert response.status_code == 200
-    assert manager.token_service.introspect(issued["access_token"]) == {"active": False}
-    assert manager.token_service.introspect(issued["refresh_token"]) == {"active": False}
+    assert await manager.token_service.introspect(issued["access_token"]) == {"active": False}
+    assert await manager.token_service.introspect(issued["refresh_token"]) == {"active": False}
 
 
 def test_refresh_token_introspection_requires_confidential_client_authentication(server):
@@ -481,7 +482,7 @@ def test_refresh_token_introspection_requires_confidential_client_authentication
     assert response.status_code == 401
 
 
-def test_revocation_ignores_wrong_hints_and_unknown_tokens(server):
+async def test_revocation_ignores_wrong_hints_and_unknown_tokens(server):
     client, manager = server
     registration = register(manager, confidential=True)
     issued = exchange(client, registration).json()
@@ -490,7 +491,7 @@ def test_revocation_ignores_wrong_hints_and_unknown_tokens(server):
         "/oauth/revoke", data={"token": issued["access_token"], "token_type_hint": "refresh_token"}, auth=credentials
     )
     assert response.status_code == 200
-    assert manager.token_service.introspect(issued["access_token"]) == {"active": False}
+    assert await manager.token_service.introspect(issued["access_token"]) == {"active": False}
     assert client.post("/oauth/revoke", data={"token": "unknown"}, auth=credentials).status_code == 200
 
 
@@ -503,30 +504,30 @@ def test_token_management_requires_authentication(server, method, path):
     assert client.request(method, path).status_code == 401
 
 
-def test_personal_token_management_supports_defaults_expiry_and_bulk_revocation(server):
+async def test_personal_token_management_supports_defaults_expiry_and_bulk_revocation(server):
     client, manager = server
     response = client.post("/oauth/personal-access-tokens", json={"name": "cli", "ttl": 60})
     assert response.status_code == 201
     body = response.json()
     assert body["scopes"] == ["read"]
     assert body["expires_in"] == 60
-    oauth = manager.token_service.issue(user_id=1, client_id="oauth", scopes=["read"], with_refresh=True)
-    foreign = manager.token_service.create_personal_access_token(user_id=2, name="other", scopes=["read"])
+    oauth = await manager.token_service.issue(user_id=1, client_id="oauth", scopes=["read"], with_refresh=True)
+    foreign = await manager.token_service.create_personal_access_token(user_id=2, name="other", scopes=["read"])
     listed = client.get("/oauth/personal-access-tokens")
     assert len(listed.json()) == 1
     assert listed.json()[0]["expires_at"] > listed.json()[0]["created_at"]
     assert body["access_token"] not in listed.text
     assert client.delete("/oauth/personal-access-tokens").status_code == 204
-    assert manager.token_service.introspect(body["access_token"]) == {"active": False}
-    assert manager.token_service.introspect(oauth.access_token)["active"] is True
-    assert manager.token_service.introspect(foreign.access_token)["active"] is True
+    assert await manager.token_service.introspect(body["access_token"]) == {"active": False}
+    assert (await manager.token_service.introspect(oauth.access_token))["active"] is True
+    assert (await manager.token_service.introspect(foreign.access_token))["active"] is True
 
 
-def test_personal_token_revocation_cannot_revoke_an_oauth_token(server):
+async def test_personal_token_revocation_cannot_revoke_an_oauth_token(server):
     client, manager = server
-    oauth = manager.token_service.issue(user_id=1, client_id="oauth", scopes=["read"], with_refresh=True)
+    oauth = await manager.token_service.issue(user_id=1, client_id="oauth", scopes=["read"], with_refresh=True)
     assert client.delete(f"/oauth/personal-access-tokens/{oauth.jti}").status_code == 204
-    assert manager.token_service.introspect(oauth.access_token)["active"] is True
+    assert (await manager.token_service.introspect(oauth.access_token))["active"] is True
 
 
 @pytest.mark.parametrize("ttl", [0, -1])

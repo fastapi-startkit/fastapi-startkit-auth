@@ -6,12 +6,12 @@ import uuid
 import pytest
 from fastapi import FastAPI
 
-from fastapi_startkit_auth import AsyncAuth
+from fastapi_startkit_auth import Auth
 from fastapi_startkit_auth.clients.models import Client
 from fastapi_startkit_auth.clients.repository import InMemoryClientRepository
 from fastapi_startkit_auth.exceptions import InvalidScopeException
-from fastapi_startkit_auth.grants.client_credentials import AsyncClientCredentialsGrant
-from fastapi_startkit_auth.grants.password import AsyncPasswordGrant
+from fastapi_startkit_auth.grants.client_credentials import ClientCredentialsGrant
+from fastapi_startkit_auth.grants.password import PasswordGrant
 from fastapi_startkit_auth.policy import GrantPolicy
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 
@@ -167,7 +167,7 @@ async def test_async_client_credentials_grant_enforces_the_allow_list():
         async def issue(self, **kwargs):
             raise AssertionError("no token may be issued")
 
-    grant = AsyncClientCredentialsGrant(Tokens())
+    grant = ClientCredentialsGrant(Tokens())
     with pytest.raises(InvalidScopeException):
         await grant.handle(client=Client(id="svc", name="svc", scopes=["read"]), scopes=["write"])
 
@@ -200,15 +200,15 @@ def test_password_route_without_a_client_is_unrestricted():
     assert _password(client, scope="write").status_code == 200
 
 
-def test_programmatic_password_grant_enforces_client_scopes():
+async def test_programmatic_password_grant_enforces_client_scopes():
     client, _ = make_auth_client(oauth2=_oauth2())
     manager = client.app.state.auth_manager
     restricted = Client(id="cli", name="cli", scopes=["read"])
     grant = manager.password_grant(client=restricted)
 
     with pytest.raises(InvalidScopeException):
-        grant.handle(username="ada@example.com", password="secret", scopes=["write"], client_id=restricted.id)
-    issued = grant.handle(username="ada@example.com", password="secret", scopes=["read"], client_id=restricted.id)
+        await grant.handle(username="ada@example.com", password="secret", scopes=["write"], client_id=restricted.id)
+    issued = await grant.handle(username="ada@example.com", password="secret", scopes=["read"], client_id=restricted.id)
     assert issued.scopes == ["read"]
 
 
@@ -217,7 +217,7 @@ async def test_async_password_grant_checks_client_scopes_before_credentials():
         async def retrieve_by_credentials(self, credentials):
             raise AssertionError("credentials must not be checked")
 
-    grant = AsyncPasswordGrant(None, Users(), client=Client(id="cli", name="cli", scopes=["read"]))
+    grant = PasswordGrant(None, Users(), client=Client(id="cli", name="cli", scopes=["read"]))
     with pytest.raises(InvalidScopeException):
         await grant.handle(username="ada", password="secret", scopes=["write"], client_id="cli")
 
@@ -251,7 +251,7 @@ def server():
 
     @api.post("/login")
     async def login():
-        await AsyncAuth.login(1)
+        await Auth.login(1)
         return {"authenticated": True}
 
     client = TestClient(api, base_url="https://server.example")

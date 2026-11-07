@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
     ApiToken,
-    AsyncAuth,
+    Auth,
     AuthConfig,
     AuthenticationException,
     current_user,
@@ -52,13 +52,13 @@ def spa_config(default_guard="web"):
 
 def wire_routes(api):
     @api.post("/login")
-    async def login(payload: dict = Body(...), auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+    async def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
         if not await auth.attempt(payload):
             raise AuthenticationException("Invalid credentials.")
         return {"ok": True}
 
     @api.post("/logout")
-    async def logout(auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+    async def logout(auth: Auth = Depends(Auth.scoped)):
         await auth.logout()
         return {"ok": True}
 

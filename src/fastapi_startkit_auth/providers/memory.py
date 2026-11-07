@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 from typing import Any
 
+from ..concurrency import resolve
 from ..security.hashing import BcryptHasher, Hasher
 from .fields import ActiveCheck, active_check
 
@@ -42,10 +44,10 @@ class InMemoryUserProvider:
         fields[self._password_field] = self._hasher.make(password)
         return self.add(fields)
 
-    def retrieve_by_id(self, identifier: Any) -> dict[str, Any] | None:
+    async def retrieve_by_id(self, identifier: Any) -> dict[str, Any] | None:
         return self._users.get(identifier)
 
-    def retrieve_by_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
+    async def retrieve_by_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
         username = credentials.get(self._username_field)
         if username is None:
             return None
@@ -54,24 +56,24 @@ class InMemoryUserProvider:
                 return user
         return None
 
-    def validate_credentials(self, user: dict[str, Any], credentials: dict[str, Any]) -> bool:
+    async def validate_credentials(self, user: dict[str, Any], credentials: dict[str, Any]) -> bool:
         if user is None:
             return False
         supplied = credentials.get(self._password_key)
         if supplied is None:
             return False
-        return self._hasher.verify(supplied, user.get(self._password_field, ""))
+        return await asyncio.to_thread(self._hasher.verify, supplied, user.get(self._password_field, ""))
 
-    def dummy_verify(self) -> None:
+    async def dummy_verify(self) -> None:
         """Run a throwaway hash verification to equalise timing for absent users."""
-        self._hasher.verify("invalid", self._dummy_hash)
+        await asyncio.to_thread(self._hasher.verify, "invalid", self._dummy_hash)
 
     def get_identifier(self, user: dict[str, Any]) -> Any:
         return user[self._id_field]
 
-    def is_active(self, user: dict[str, Any]) -> bool:
-        return self._is_active(user)
+    async def is_active(self, user: dict[str, Any]) -> bool:
+        return bool(await resolve(self._is_active(user)))
 
-    def update_password(self, user: dict[str, Any], plain: str) -> None:
+    async def update_password(self, user: dict[str, Any], plain: str) -> None:
         stored = self._users[user[self._id_field]]
-        stored[self._password_field] = self._hasher.make(plain)
+        stored[self._password_field] = await asyncio.to_thread(self._hasher.make, plain)

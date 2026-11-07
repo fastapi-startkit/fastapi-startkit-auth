@@ -153,24 +153,24 @@ def tokens():
     return ApiTokenManager(InMemoryApiTokenRepository())
 
 
-def test_plaintext_is_id_pipe_secret(tokens):
-    issued = tokens.create(user_id=1, name="cli")
+async def test_plaintext_is_id_pipe_secret(tokens):
+    issued = await tokens.create(user_id=1, name="cli")
     token_id, sep, secret = issued.plain_text.partition("|")
     assert sep == "|"
     assert token_id == issued.record.id
     assert len(secret) >= 40
 
 
-def test_only_the_hash_is_stored_at_rest(tokens):
-    issued = tokens.create(user_id=1)
+async def test_only_the_hash_is_stored_at_rest(tokens):
+    issued = await tokens.create(user_id=1)
     secret = issued.plain_text.partition("|")[2]
     stored = tokens.repository.find(issued.record.id)
     assert stored.token_hash == sha256(secret)
     assert secret not in stored.token_hash
 
 
-def test_repr_never_leaks_the_secret(tokens):
-    issued = tokens.create(user_id=1, name="cli")
+async def test_repr_never_leaks_the_secret(tokens):
+    issued = await tokens.create(user_id=1, name="cli")
     secret = issued.plain_text.partition("|")[2]
     rendered = repr(issued)
     assert secret not in rendered
@@ -180,53 +180,53 @@ def test_repr_never_leaks_the_secret(tokens):
     assert "***redacted***" in rendered
 
 
-def test_verify_returns_the_record_and_touches_it(tokens):
-    issued = tokens.create(user_id=1, abilities=["posts:read"])
-    record = tokens.verify(issued.plain_text)
+async def test_verify_returns_the_record_and_touches_it(tokens):
+    issued = await tokens.create(user_id=1, abilities=["posts:read"])
+    record = await tokens.verify(issued.plain_text)
     assert record.id == issued.record.id
     assert record.abilities == ["posts:read"]
     assert tokens.repository.find(record.id).last_used_at is not None
 
 
-def test_abilities_default_to_wildcard(tokens):
-    issued = tokens.create(user_id=1)
+async def test_abilities_default_to_wildcard(tokens):
+    issued = await tokens.create(user_id=1)
     assert issued.record.abilities == ["*"]
 
 
-def test_verify_rejects_wrong_secret(tokens):
-    issued = tokens.create(user_id=1)
+async def test_verify_rejects_wrong_secret(tokens):
+    issued = await tokens.create(user_id=1)
     with pytest.raises(InvalidTokenException):
-        tokens.verify(f"{issued.record.id}|wrong-secret")
+        await tokens.verify(f"{issued.record.id}|wrong-secret")
 
 
-def test_verify_rejects_unknown_id(tokens):
-    tokens.create(user_id=1)
+async def test_verify_rejects_unknown_id(tokens):
+    await tokens.create(user_id=1)
     with pytest.raises(InvalidTokenException):
-        tokens.verify("unknown|some-secret")
+        await tokens.verify("unknown|some-secret")
 
 
 @pytest.mark.parametrize("malformed", ["", "|", "no-pipe", "id|", "|secret"])
-def test_verify_rejects_malformed_tokens(tokens, malformed):
+async def test_verify_rejects_malformed_tokens(tokens, malformed):
     with pytest.raises(InvalidTokenException):
-        tokens.verify(malformed)
+        await tokens.verify(malformed)
 
 
-def test_verify_rejects_expired_tokens(tokens):
-    issued = tokens.create(user_id=1, expires_at=time.time() - 1)
+async def test_verify_rejects_expired_tokens(tokens):
+    issued = await tokens.create(user_id=1, expires_at=time.time() - 1)
     with pytest.raises(InvalidTokenException):
-        tokens.verify(issued.plain_text)
+        await tokens.verify(issued.plain_text)
 
 
-def test_verify_rejects_revoked_tokens(tokens):
-    issued = tokens.create(user_id=1)
-    assert tokens.revoke(issued.record.id) is True
+async def test_verify_rejects_revoked_tokens(tokens):
+    issued = await tokens.create(user_id=1)
+    assert await tokens.revoke(issued.record.id) is True
     with pytest.raises(InvalidTokenException):
-        tokens.verify(issued.plain_text)
+        await tokens.verify(issued.plain_text)
 
 
-def test_all_failures_share_one_generic_message(tokens):
-    issued = tokens.create(user_id=1)
-    expired = tokens.create(user_id=1, expires_at=time.time() - 1)
+async def test_all_failures_share_one_generic_message(tokens):
+    issued = await tokens.create(user_id=1)
+    expired = await tokens.create(user_id=1, expires_at=time.time() - 1)
     failures = [
         f"{issued.record.id}|wrong-secret",   # bad secret, live id
         "unknown|some-secret",                # unknown id
@@ -236,47 +236,47 @@ def test_all_failures_share_one_generic_message(tokens):
     messages = set()
     for attempt in failures:
         with pytest.raises(InvalidTokenException) as excinfo:
-            tokens.verify(attempt)
+            await tokens.verify(attempt)
         messages.add(str(excinfo.value))
     assert len(messages) == 1
 
 
-def test_default_ttl_from_config_applies(tokens):
+async def test_default_ttl_from_config_applies(tokens):
     limited = ApiTokenManager(InMemoryApiTokenRepository(), default_ttl=60)
-    issued = limited.create(user_id=1)
+    issued = await limited.create(user_id=1)
     assert issued.record.expires_at == pytest.approx(time.time() + 60, abs=5)
 
 
-def test_explicit_expires_at_overrides_default_ttl():
+async def test_explicit_expires_at_overrides_default_ttl():
     limited = ApiTokenManager(InMemoryApiTokenRepository(), default_ttl=60)
     deadline = time.time() + 5
-    issued = limited.create(user_id=1, expires_at=deadline)
+    issued = await limited.create(user_id=1, expires_at=deadline)
     assert issued.record.expires_at == deadline
 
 
-def test_revoke_all_and_list(tokens):
-    a = tokens.create(user_id=1, name="a")
-    tokens.create(user_id=1, name="b")
-    other = tokens.create(user_id=2, name="c")
-    assert {rec.name for rec in tokens.tokens_for(1)} == {"a", "b"}
-    assert tokens.revoke_all(1) == 2
-    assert tokens.tokens_for(1) == []
-    tokens.verify(other.plain_text)
+async def test_revoke_all_and_list(tokens):
+    a = await tokens.create(user_id=1, name="a")
+    await tokens.create(user_id=1, name="b")
+    other = await tokens.create(user_id=2, name="c")
+    assert {rec.name for rec in await tokens.tokens_for(1)} == {"a", "b"}
+    assert await tokens.revoke_all(1) == 2
+    assert await tokens.tokens_for(1) == []
+    await tokens.verify(other.plain_text)
     with pytest.raises(InvalidTokenException):
-        tokens.verify(a.plain_text)
+        await tokens.verify(a.plain_text)
 
 
-def test_create_opportunistically_purges_expired_tokens():
+async def test_create_opportunistically_purges_expired_tokens():
     eager = ApiTokenManager(InMemoryApiTokenRepository(), purge_interval=0)
-    dead = eager.create(user_id=1, expires_at=time.time() - 1)
-    eager.create(user_id=1)
+    dead = await eager.create(user_id=1, expires_at=time.time() - 1)
+    await eager.create(user_id=1)
     assert eager.repository._tokens.get(dead.record.id) is None
 
 
-def test_purge_on_create_respects_the_interval():
+async def test_purge_on_create_respects_the_interval():
     lazy = ApiTokenManager(InMemoryApiTokenRepository(), purge_interval=3600)
-    dead = lazy.create(user_id=1, expires_at=time.time() - 1)
-    lazy.create(user_id=1)
+    dead = await lazy.create(user_id=1, expires_at=time.time() - 1)
+    await lazy.create(user_id=1)
     # Interval not elapsed: the expired row is still sitting in the store.
     assert dead.record.id in lazy.repository._tokens
 
@@ -337,9 +337,9 @@ def bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_bearer_token_resolves_the_user(guard_client):
+async def test_bearer_token_resolves_the_user(guard_client):
     client, manager = guard_client
-    issued = manager.api_tokens.create(user_id=1, name="cli")
+    issued = await manager.api_tokens.create(user_id=1, name="cli")
     response = client.get("/me", headers=bearer(issued.plain_text))
     assert response.status_code == 200
     assert response.json()["email"] == "ada@example.com"
@@ -352,42 +352,42 @@ def test_missing_token_is_401(guard_client):
     assert response.json()["error"] == "invalid_session"
 
 
-def test_wrong_secret_is_a_generic_401(guard_client):
+async def test_wrong_secret_is_a_generic_401(guard_client):
     client, manager = guard_client
-    issued = manager.api_tokens.create(user_id=1)
+    issued = await manager.api_tokens.create(user_id=1)
     response = client.get("/me", headers=bearer(f"{issued.record.id}|forged"))
     assert response.status_code == 401
     unknown = client.get("/me", headers=bearer("unknown-id|forged"))
     assert response.json() == unknown.json()
 
 
-def test_revoked_token_is_401(guard_client):
+async def test_revoked_token_is_401(guard_client):
     client, manager = guard_client
-    issued = manager.api_tokens.create(user_id=1)
+    issued = await manager.api_tokens.create(user_id=1)
     assert client.get("/me", headers=bearer(issued.plain_text)).status_code == 200
-    manager.api_tokens.revoke(issued.record.id)
+    await manager.api_tokens.revoke(issued.record.id)
     assert client.get("/me", headers=bearer(issued.plain_text)).status_code == 401
 
 
-def test_expired_token_is_401(guard_client):
+async def test_expired_token_is_401(guard_client):
     client, manager = guard_client
-    issued = manager.api_tokens.create(user_id=1, expires_at=time.time() - 1)
+    issued = await manager.api_tokens.create(user_id=1, expires_at=time.time() - 1)
     assert client.get("/me", headers=bearer(issued.plain_text)).status_code == 401
 
 
-def test_optional_user_returns_none_without_token(guard_client):
+async def test_optional_user_returns_none_without_token(guard_client):
     client, manager = guard_client
     assert client.get("/maybe").json() == {"user": None}
-    issued = manager.api_tokens.create(user_id=2)
+    issued = await manager.api_tokens.create(user_id=2)
     body = client.get("/maybe", headers=bearer(issued.plain_text)).json()
     assert body["user"]["email"] == "grace@example.com"
 
 
-def test_abilities_gate_require_scopes(guard_client):
+async def test_abilities_gate_require_scopes(guard_client):
     client, manager = guard_client
-    reader = manager.api_tokens.create(user_id=1, abilities=["posts:read"])
-    limited = manager.api_tokens.create(user_id=1, abilities=["posts:write"])
-    unrestricted = manager.api_tokens.create(user_id=1)
+    reader = await manager.api_tokens.create(user_id=1, abilities=["posts:read"])
+    limited = await manager.api_tokens.create(user_id=1, abilities=["posts:write"])
+    unrestricted = await manager.api_tokens.create(user_id=1)
     assert client.get("/needs-read", headers=bearer(reader.plain_text)).status_code == 200
     assert client.get("/needs-read", headers=bearer(unrestricted.plain_text)).status_code == 200
     denied = client.get("/needs-read", headers=bearer(limited.plain_text))
@@ -399,32 +399,32 @@ def test_require_abilities_is_require_scopes():
     assert require_abilities is require_scopes
 
 
-def test_configurable_token_header():
+async def test_configurable_token_header():
     client, manager = make_client(api_tokens={"header": "X-Api-Token"})
-    issued = manager.api_tokens.create(user_id=1)
+    issued = await manager.api_tokens.create(user_id=1)
     assert client.get("/me", headers={"X-Api-Token": issued.plain_text}).status_code == 200
     # The default Authorization header is no longer consulted.
     assert client.get("/me", headers=bearer(issued.plain_text)).status_code == 401
 
 
-def test_default_ttl_flows_from_config():
+async def test_default_ttl_flows_from_config():
     _, manager = make_client(api_tokens={"ttl": 120})
-    issued = manager.api_tokens.create(user_id=1)
+    issued = await manager.api_tokens.create(user_id=1)
     assert issued.record.expires_at == pytest.approx(time.time() + 120, abs=5)
 
 
-def test_token_guard_coexists_with_passport_guard():
+async def test_token_guard_coexists_with_passport_guard():
     client, manager = make_client(
         guards={
             "api": {"driver": "passport", "provider": "users"},
             "mobile": {"driver": "token", "provider": "users"},
         }
     )
-    issued = manager.api_tokens.create(user_id=1)
-    context = manager.guard("mobile").user_from_token(issued.plain_text)
+    issued = await manager.api_tokens.create(user_id=1)
+    context = await manager.guard("mobile").user_from_token(issued.plain_text)
     assert context.user["id"] == 1
     # The default passport guard still owns the OAuth2 routes and JWT flow.
-    jwt_token = manager.token_service.issue(user_id=1, client_id=None, scopes=["*"])
+    jwt_token = await manager.token_service.issue(user_id=1, client_id=None, scopes=["*"])
     response = client.get("/me", headers=bearer(jwt_token.access_token))
     assert response.status_code == 200
 
@@ -448,10 +448,10 @@ def test_guard_satisfies_the_guard_protocol():
     assert isinstance(manager.guard("api"), TokenGuard)
 
 
-def test_orphaned_token_fails_generically_and_is_revoked(tokens):
+async def test_orphaned_token_fails_generically_and_is_revoked(tokens):
     provider = seeded_provider()
     guard = TokenGuard(name="api", tokens=tokens, provider=provider)
-    issued = tokens.create(user_id=999)  # no such user
+    issued = await tokens.create(user_id=999)  # no such user
     with pytest.raises(InvalidTokenException):
-        guard.user_from_token(issued.plain_text)
+        await guard.user_from_token(issued.plain_text)
     assert tokens.repository.find(issued.record.id) is None
