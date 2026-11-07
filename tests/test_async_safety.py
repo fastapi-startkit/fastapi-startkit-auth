@@ -460,3 +460,44 @@ async def test_sync_model_queries_and_save_never_run_on_the_loop():
 def test_async_model_driver_reports_its_replacement():
     with pytest.raises(ValueError, match='"async_model" was removed: use driver "model"'):
         install(FastAPI(), provider={"driver": "async_model", "model": Account})
+
+
+class SyncCustomProvider:
+    def retrieve_by_id(self, identifier):
+        record_thread()
+        return Account.rows.get(int(identifier))
+
+    def retrieve_by_credentials(self, credentials):
+        record_thread()
+        return next((u for u in Account.rows.values() if u.email == credentials.get("email")), None)
+
+    def validate_credentials(self, user, credentials):
+        record_thread()
+        return HASHER.verify(credentials.get("password", ""), user.password)
+
+    def dummy_verify(self):
+        record_thread()
+
+    def is_active(self, user):
+        record_thread()
+        return user.active
+
+    def update_password(self, user, plain):
+        record_thread()
+
+    def get_identifier(self, user):
+        return user.id
+
+
+async def test_sync_custom_provider_runs_off_the_loop():
+    client, _ = await build(default_guard="web", provider={"driver": "instance", "instance": SyncCustomProvider()})
+    async with client:
+        assert (await client.post("/login", json={"email": "nobody@example.com", "password": "x"})).json() == {
+            "ok": False
+        }
+        assert (await client.post("/login", json={"email": "ada@example.com", "password": "secret"})).json() == {
+            "ok": True
+        }
+        assert (await client.get("/me")).json() == {"id": 1}
+    assert len(LOOP_CALLS) >= 5
+    assert not any(LOOP_CALLS)

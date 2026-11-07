@@ -429,7 +429,10 @@ class AuthManager:
                 provider.add(user)
             return provider
         if driver == "async_model":
-            raise ValueError('User provider driver "async_model" was removed: use driver "model", which accepts sync and async models.')
+            raise ValueError(
+                'User provider driver "async_model" was removed: '
+                'use driver "model", which accepts sync and async models.'
+            )
         if driver in ("masoniteorm", "orm", "model"):
             return ModelUserProvider(
                 model=spec["model"],

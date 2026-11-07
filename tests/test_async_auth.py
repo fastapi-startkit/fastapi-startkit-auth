@@ -28,7 +28,7 @@ from conftest import PASSWORD_GRANTS, VERIFIER, auth_manager, oauth2_config, reg
 HASHER = BcryptHasher(rounds=4)
 
 
-class AsyncUser:
+class UserRecord:
 
     rows: dict = {}
     saves: list = []
@@ -59,16 +59,16 @@ class AsyncUser:
 
 @pytest.fixture(autouse=True)
 def users():
-    AsyncUser.seed(
-        AsyncUser(id=1, email="ada@example.com", hashed_password=HASHER.make("secret"), is_active=True),
-        AsyncUser(id=2, email="off@example.com", hashed_password=HASHER.make("secret"), is_active=False),
+    UserRecord.seed(
+        UserRecord(id=1, email="ada@example.com", hashed_password=HASHER.make("secret"), is_active=True),
+        UserRecord(id=2, email="off@example.com", hashed_password=HASHER.make("secret"), is_active=False),
     )
-    return AsyncUser.rows
+    return UserRecord.rows
 
 
 USER_PROVIDER = {
     "driver": "model",
-    "model": AsyncUser,
+    "model": UserRecord,
     "password_field": "hashed_password",
     "password_key": "password",
     "is_active": "is_active",
@@ -197,7 +197,7 @@ def test_removed_sql_stores_point_to_the_orm_store(section, removed):
 
 async def test_provider_reads_hashed_password_column_with_password_key():
     provider = ModelUserProvider(
-        AsyncUser, hasher=HASHER, password_field="hashed_password", password_key="password"
+        UserRecord, hasher=HASHER, password_field="hashed_password", password_key="password"
     )
     user = await provider.retrieve_by_credentials({"email": "ada@example.com"})
     assert user.id == 1
@@ -210,14 +210,14 @@ async def test_provider_reads_hashed_password_column_with_password_key():
 
 
 async def test_provider_is_active_accepts_attribute_or_callable():
-    by_attribute = ModelUserProvider(AsyncUser, hasher=HASHER, is_active="is_active")
-    by_callable = ModelUserProvider(AsyncUser, hasher=HASHER, is_active=lambda user: user.id == 2)
-    default = ModelUserProvider(AsyncUser, hasher=HASHER)
-    active, inactive = AsyncUser.rows[1], AsyncUser.rows[2]
+    by_attribute = ModelUserProvider(UserRecord, hasher=HASHER, is_active="is_active")
+    by_callable = ModelUserProvider(UserRecord, hasher=HASHER, is_active=lambda user: user.id == 2)
+    default = ModelUserProvider(UserRecord, hasher=HASHER)
+    active, inactive = UserRecord.rows[1], UserRecord.rows[2]
     async def by_coroutine_check(user):
         return user.id == 1
 
-    by_coroutine = ModelUserProvider(AsyncUser, hasher=HASHER, is_active=by_coroutine_check)
+    by_coroutine = ModelUserProvider(UserRecord, hasher=HASHER, is_active=by_coroutine_check)
     assert (await by_attribute.is_active(active), await by_attribute.is_active(inactive)) == (True, False)
     assert (await by_callable.is_active(active), await by_callable.is_active(inactive)) == (False, True)
     assert (await by_coroutine.is_active(active), await by_coroutine.is_active(inactive)) == (True, False)
@@ -225,10 +225,10 @@ async def test_provider_is_active_accepts_attribute_or_callable():
 
 
 async def test_provider_update_password_awaits_save():
-    provider = ModelUserProvider(AsyncUser, hasher=HASHER, password_field="hashed_password")
-    user = AsyncUser.rows[1]
+    provider = ModelUserProvider(UserRecord, hasher=HASHER, password_field="hashed_password")
+    user = UserRecord.rows[1]
     await provider.update_password(user, "new-secret")
-    assert AsyncUser.saves == [1]
+    assert UserRecord.saves == [1]
     assert HASHER.verify("new-secret", user.hashed_password)
 
 
@@ -408,7 +408,7 @@ async def test_token_guard_with_async_api_tokens(orm_database):
         record_id = issued.record.id
         assert [r.id for r in await manager.api_tokens.tokens_for(1)] == [record_id]
         assert (await client.get("/me", headers=bearer(f"{record_id}|wrong"))).status_code == 401
-        AsyncUser.rows[1].is_active = False
+        UserRecord.rows[1].is_active = False
         assert (await client.get("/me", headers=bearer(issued.plain_text))).status_code == 401
         assert await manager.api_tokens.revoke(record_id) is True
 
@@ -430,7 +430,7 @@ async def test_password_reset_with_async_provider(orm_database):
             "/password/reset", json={"email": email, "token": token, "password": "brand-new"}
         )
         assert reset.status_code == 200, reset.text
-        assert AsyncUser.saves == [1]
+        assert UserRecord.saves == [1]
         assert (await password_token(client, password="secret")).status_code == 400
         assert (await password_token(client, password="brand-new")).status_code == 200
         replay = await client.post("/password/reset", json={"email": email, "token": token, "password": "x"})
