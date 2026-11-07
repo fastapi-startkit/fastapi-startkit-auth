@@ -11,8 +11,6 @@ from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import AuthConfig
 from fastapi_startkit_auth.grants import (
-    AsyncAuthorizationCodeGrant,
-    AsyncRefreshTokenGrant,
     AuthorizationCodeGrant,
     RefreshTokenGrant,
 )
@@ -78,8 +76,8 @@ def install(api, providers, connection=None):
 
 
 ASYNC_PROVIDERS = {
-    "users": {"driver": "async_model", "model": Customer, "is_active": "active"},
-    "staff": {"driver": "async_model", "model": Staff, "is_active": "active"},
+    "users": {"driver": "model", "model": Customer, "is_active": "active"},
+    "staff": {"driver": "model", "model": Staff, "is_active": "active"},
 }
 
 
@@ -115,7 +113,7 @@ async def test_password_grant_uses_the_clients_provider(orm_database):
 
 async def test_refresh_rechecks_the_issuing_provider(orm_database):
     client, manager = await build(orm_database)
-    assert isinstance(manager.refresh_grant(), AsyncRefreshTokenGrant)
+    assert isinstance(manager.refresh_grant(), RefreshTokenGrant)
     async with client:
         tokens, auth = await staff_tokens(client, manager)
         Customer.rows[1].active = False
@@ -143,7 +141,7 @@ async def test_introspect_rechecks_the_issuing_provider(orm_database):
 async def test_authorization_code_rechecks_the_clients_provider(orm_database):
     _, manager = await build(orm_database)
     grant = manager.authorization_code_grant()
-    assert isinstance(grant, AsyncAuthorizationCodeGrant)
+    assert isinstance(grant, AuthorizationCodeGrant)
     spa, _ = register(manager, "staff", redirect_uris=["https://app/cb"], confidential=False)
     exchange = {"client": spa, "redirect_uri": "https://app/cb", "code_verifier": VERIFIER}
     issue = {"client": spa, "user_id": 1, "scopes": [], "redirect_uri": "https://app/cb", "code_challenge": CHALLENGE}
@@ -192,7 +190,7 @@ def sync_app():
     return TestClient(api), manager
 
 
-def test_sync_refresh_rechecks_the_issuing_provider():
+async def test_sync_refresh_rechecks_the_issuing_provider():
     client, manager = sync_app()
     assert isinstance(manager.refresh_grant(), RefreshTokenGrant)
     staff_client, secret = register(manager, "staff")
@@ -200,18 +198,18 @@ def test_sync_refresh_rechecks_the_issuing_provider():
     login = {"grant_type": "password", "username": "root@example.com", "password": "secret"}
     tokens = client.post("/oauth/token", data=login, auth=auth).json()
 
-    manager.provider("users").retrieve_by_id(1)["active"] = False
+    (await manager.provider("users").retrieve_by_id(1))["active"] = False
     refresh = {"grant_type": "refresh_token", "refresh_token": tokens["refresh_token"]}
     refreshed = client.post("/oauth/token", data=refresh, auth=auth)
     assert refreshed.status_code == 200, refreshed.text
 
-    manager.provider("users").retrieve_by_id(1)["active"] = True
-    manager.provider("staff").retrieve_by_id(1)["active"] = False
+    (await manager.provider("users").retrieve_by_id(1))["active"] = True
+    (await manager.provider("staff").retrieve_by_id(1))["active"] = False
     refresh["refresh_token"] = refreshed.json()["refresh_token"]
     assert client.post("/oauth/token", data=refresh, auth=auth).json()["error"] == "invalid_grant"
 
 
-def test_sync_authorization_code_rechecks_the_clients_provider():
+async def test_sync_authorization_code_rechecks_the_clients_provider():
     _, manager = sync_app()
     grant = manager.authorization_code_grant()
     assert isinstance(grant, AuthorizationCodeGrant)
@@ -219,20 +217,20 @@ def test_sync_authorization_code_rechecks_the_clients_provider():
     exchange = {"client": spa, "redirect_uri": "https://app/cb", "code_verifier": VERIFIER}
     issue = {"client": spa, "user_id": 1, "scopes": [], "redirect_uri": "https://app/cb", "code_challenge": CHALLENGE}
 
-    manager.provider("users").retrieve_by_id(1)["active"] = False
-    code = grant.issue_code(**issue, code_challenge_method="S256")
-    assert grant.handle(code=code, **exchange).access_token
+    (await manager.provider("users").retrieve_by_id(1))["active"] = False
+    code = await grant.issue_code(**issue, code_challenge_method="S256")
+    assert (await grant.handle(code=code, **exchange)).access_token
 
-    manager.provider("users").retrieve_by_id(1)["active"] = True
-    manager.provider("staff").retrieve_by_id(1)["active"] = False
-    code = grant.issue_code(**issue, code_challenge_method="S256")
+    (await manager.provider("users").retrieve_by_id(1))["active"] = True
+    (await manager.provider("staff").retrieve_by_id(1))["active"] = False
+    code = await grant.issue_code(**issue, code_challenge_method="S256")
     with pytest.raises(Exception, match="no longer exists or is not active"):
-        grant.handle(code=code, **exchange)
+        await grant.handle(code=code, **exchange)
 
 
-def test_client_without_provider_falls_back_to_the_default_guard():
+async def test_client_without_provider_falls_back_to_the_default_guard():
     _, manager = sync_app()
     plain, _ = register(manager, None)
-    assert manager.owner_provider(plain.id) is manager.guard().provider
-    assert manager.owner_provider(None) is manager.guard().provider
-    assert manager.owner_provider("unknown") is manager.guard().provider
+    assert await manager.owner_provider(plain.id) is manager.guard().provider
+    assert await manager.owner_provider(None) is manager.guard().provider
+    assert await manager.owner_provider("unknown") is manager.guard().provider

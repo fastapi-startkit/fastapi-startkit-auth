@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import warnings
 from types import SimpleNamespace
 
 import httpx
@@ -9,24 +8,15 @@ from fastapi import Body, Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from fastapi_startkit_auth import (
-    AsyncAuth,
-    AsyncPassportGuard,
     Auth,
     AuthConfig,
-    SessionGuard,
     current_user,
 )
 from fastapi_startkit_auth import concurrency
-from fastapi_startkit_auth.concurrency import AsyncMisconfiguration
-from fastapi_startkit_auth.grants import AsyncPasswordGrant, PasswordGrant, RefreshTokenGrant
-from fastapi_startkit_auth.providers.base import user_is_active
-from fastapi_startkit_auth.providers.memory import InMemoryUserProvider
-from fastapi_startkit_auth.providers.model import AsyncModelUserProvider, ModelUserProvider
+from fastapi_startkit_auth.grants import RefreshTokenGrant
+from fastapi_startkit_auth.providers.model import ModelUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
-from fastapi_startkit_auth.security.jwt import JWTEncoder
 from fastapi_startkit_auth.sessions.store import InMemorySessionStore
-from fastapi_startkit_auth.tokens.repository import InMemoryTokenRepository
-from fastapi_startkit_auth.tokens.service import TokenService
 
 from conftest import PASSWORD_GRANTS, VERIFIER, SyncClientRepository, oauth2_config, register_auth, s256_challenge
 
@@ -80,7 +70,7 @@ def accounts():
     return Account.rows
 
 
-ASYNC_PROVIDER = {"driver": "async_model", "model": Account, "is_active": account_is_active}
+ASYNC_PROVIDER = {"driver": "model", "model": Account, "is_active": account_is_active}
 
 
 def make_config(*, default_guard="api", provider=None):
@@ -117,7 +107,7 @@ async def build(connection=None, **kwargs):
         return {"id": user["id"] if isinstance(user, dict) else user.id}
 
     @api.post("/login")
-    async def login(payload: dict = Body(...), auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+    async def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
         return {"ok": await auth.attempt(payload, guard="web")}
 
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=api), base_url="https://testserver")
@@ -179,56 +169,6 @@ async def test_async_is_active_hook_denies_attempt_and_session_guard(orm_databas
         accounts[1].active = False
         assert (await client.get("/me")).status_code == 401
 
-
-@pytest.mark.parametrize("provider_class", [InMemoryUserProvider, lambda **kw: ModelUserProvider(Account, **kw)])
-def test_sync_providers_reject_async_is_active_hook(provider_class):
-    with pytest.raises(TypeError, match="async provider"):
-        provider_class(hasher=HASHER, is_active=account_is_active)
-
-
-def test_sync_is_active_check_fails_closed_on_awaitable():
-    provider = SimpleNamespace(is_active=lambda user: account_is_active(user))
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        with pytest.raises(AsyncMisconfiguration):
-            user_is_active(provider, Account.rows[2])
-
-
-# --- providers with only some async methods --------------------------------
-
-
-class AsyncValidateProvider(InMemoryUserProvider):
-    async def validate_credentials(self, user, credentials):
-        return await asyncio.to_thread(super().validate_credentials, user, credentials)
-
-
-def mixed_provider():
-    provider = AsyncValidateProvider(hasher=HASHER)
-    provider.create(id=1, email="ada@example.com", password="secret")
-    return provider
-
-
-async def test_async_validate_credentials_selects_async_grant_and_denies_wrong_password():
-    client, manager = await build(provider={"driver": "instance", "instance": mixed_provider()})
-    async with client:
-        assert isinstance(manager.password_grant(), AsyncPasswordGrant)
-        assert isinstance(manager.guard("api"), AsyncPassportGuard)
-        assert (await password_token(client, password="wrong")).json()["error"] == "invalid_grant"
-        token = (await password_token(client)).json()["access_token"]
-        assert (await client.get("/me", headers=bearer(token))).json() == {"id": 1}
-
-
-def test_sync_grant_and_attempt_fail_closed_on_async_validate():
-    provider = mixed_provider()
-    tokens = TokenService(encoder=JWTEncoder(secret=KEY), repository=InMemoryTokenRepository())
-    with pytest.raises(AsyncMisconfiguration):
-        PasswordGrant(tokens, provider).handle(username="ada@example.com", password="wrong", scopes=[], client_id=None)
-
-    guard = SessionGuard(name="web", store=InMemorySessionStore(), provider=provider, ttl=None)
-    manager = SimpleNamespace(guard=lambda name=None: guard, session_guard=lambda name=None: guard)
-    request = SimpleNamespace(state=SimpleNamespace())
-    with pytest.raises(AsyncMisconfiguration):
-        Auth(manager, request).attempt({"email": "ada@example.com", "password": "wrong"})
 
 
 # --- owner re-checks on refresh, code exchange and introspection -----------
@@ -303,7 +243,7 @@ async def test_introspect_reports_gone_owner_as_inactive(orm_database, accounts,
 
 
 @pytest.mark.parametrize("how", ["deactivated", "deleted"])
-def test_sync_refresh_grant_denied_when_owner_is_gone(how):
+async def test_sync_refresh_grant_denied_when_owner_is_gone(how):
     users = [{"id": 1, "email": "ada@example.com", "password": HASHER.make("secret"), "active": True}]
     provider = {"driver": "memory", "users": users, "is_active": "active"}
     api = FastAPI()
@@ -314,7 +254,7 @@ def test_sync_refresh_grant_denied_when_owner_is_gone(how):
     issued = client.post(
         "/oauth/token", data={"grant_type": "password", "username": "ada@example.com", "password": "secret"}
     )
-    stored = manager.guard().provider.retrieve_by_id(1)
+    stored = await manager.guard().provider.retrieve_by_id(1)
     if how == "deactivated":
         stored["active"] = False
     else:
@@ -419,7 +359,7 @@ def offloads(monkeypatch):
 
 @pytest.mark.parametrize("hook", [None, "active", account_is_active])
 async def test_async_is_active_runs_cheap_hooks_inline(offloads, hook):
-    provider = AsyncModelUserProvider(Account, hasher=HASHER, is_active=hook)
+    provider = ModelUserProvider(Account, hasher=HASHER, is_active=hook)
     assert await provider.is_active(Account.rows[1]) is True
     if hook is not None:
         assert await provider.is_active(Account.rows[2]) is False
@@ -427,14 +367,14 @@ async def test_async_is_active_runs_cheap_hooks_inline(offloads, hook):
 
 
 async def test_async_is_active_offloads_a_sync_hook(offloads):
-    provider = AsyncModelUserProvider(Account, hasher=HASHER, is_active=sync_is_active)
+    provider = ModelUserProvider(Account, hasher=HASHER, is_active=sync_is_active)
     assert await provider.is_active(Account.rows[1]) is True
     assert offloads == [sync_is_active]
     assert LOOP_CALLS == [False]
 
 
 async def test_async_is_active_awaits_a_sync_hook_returning_an_awaitable(offloads):
-    provider = AsyncModelUserProvider(Account, hasher=HASHER, is_active=lambda user: account_is_active(user))
+    provider = ModelUserProvider(Account, hasher=HASHER, is_active=lambda user: account_is_active(user))
     assert await provider.is_active(Account.rows[1]) is True
     assert await provider.is_active(Account.rows[2]) is False
     assert len(offloads) == 2
@@ -457,7 +397,7 @@ async def test_async_is_active_fails_closed_when_the_hook_raises(orm_database, h
 
 
 async def test_async_is_active_treats_a_missing_attribute_as_inactive():
-    provider = AsyncModelUserProvider(Account, hasher=HASHER, is_active="active")
+    provider = ModelUserProvider(Account, hasher=HASHER, is_active="active")
     assert await provider.is_active(SimpleNamespace(id=3)) is False
 
 
@@ -469,7 +409,7 @@ def install_instance(api, provider):
 
 
 async def test_manager_warm_up_precomputes_the_dummy_hash_off_the_loop():
-    provider = AsyncModelUserProvider(Account, hasher=RecordingHasher(rounds=4))
+    provider = ModelUserProvider(Account, hasher=RecordingHasher(rounds=4))
     manager = install_instance(FastAPI(), provider)
     await manager.warm_up()
     warmed = provider._dummy_hash
@@ -484,7 +424,7 @@ async def test_manager_warm_up_precomputes_the_dummy_hash_off_the_loop():
 
 
 def test_app_startup_warms_the_providers():
-    provider = AsyncModelUserProvider(Account, hasher=HASHER)
+    provider = ModelUserProvider(Account, hasher=HASHER)
     api = FastAPI()
     install_instance(api, provider)
     assert provider._dummy_hash is None
@@ -501,7 +441,7 @@ def test_app_startup_keeps_the_apps_own_lifespan():
         yield
         events.append("stop")
 
-    provider = AsyncModelUserProvider(Account, hasher=HASHER)
+    provider = ModelUserProvider(Account, hasher=HASHER)
     api = FastAPI(lifespan=lifespan)
     install_instance(api, provider)
     with TestClient(api):

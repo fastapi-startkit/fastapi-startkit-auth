@@ -4,7 +4,7 @@ import httpx
 import pytest
 from fastapi import Body, Depends, FastAPI
 
-from fastapi_startkit_auth import AsyncAuth, Auth, AuthenticationException, Session
+from fastapi_startkit_auth import Auth, AuthenticationException, Session
 from fastapi_startkit_auth.dependencies import auth
 from fastapi_startkit_auth.request_context import current_auth_request
 
@@ -22,7 +22,7 @@ def facade_app():
 
     @api.post("/login")
     async def login(credentials: dict = Body(...)):
-        if not await AsyncAuth.attempt(credentials):
+        if not await Auth.attempt(credentials):
             raise AuthenticationException("Invalid credentials.")
         previous = Session.id()
         await Session.regenerate()
@@ -30,7 +30,7 @@ def facade_app():
 
     @api.post("/logout")
     async def logout():
-        await AsyncAuth.logout()
+        await Auth.logout()
         return {"id": Session.id()}
 
     @api.post("/invalidate")
@@ -46,15 +46,15 @@ def facade_app():
     @api.get("/dashboard", dependencies=[Depends(auth)])
     async def dashboard():
         return {
-            "user": await AsyncAuth.user(),
-            "id": await AsyncAuth.id(),
-            "check": await AsyncAuth.check(),
+            "user": await Auth.user(),
+            "id": await Auth.id(),
+            "check": await Auth.check(),
             "manager": current_auth_request().manager is manager,
         }
 
     @api.post("/validate")
-    def validate(credentials: dict = Body(...)):
-        user = Auth.validate(credentials)
+    async def validate(credentials: dict = Body(...)):
+        user = await Auth.validate(credentials)
         return {"id": user["id"] if user else None, "session": Session.id()}
 
     @api.get("/csrf-token")
@@ -63,7 +63,7 @@ def facade_app():
 
     @api.get("/error")
     async def error():
-        await AsyncAuth.login(1)
+        await Auth.login(1)
         raise RuntimeError("handler failed")
 
     return api, manager
@@ -109,13 +109,13 @@ async def test_guest_session_and_invalidation(facade_app):
     assert COOKIE not in client.cookies
 
 
-def test_facades_reject_access_outside_a_request(facade_app):
+async def test_facades_reject_access_outside_a_request(facade_app):
     api, _ = facade_app
     client = TestClient(api)
     with pytest.raises(RuntimeError, match="handler failed"):
         client.get("/error")
     with pytest.raises(RuntimeError, match="active request"):
-        Auth.login(1)
+        await Auth.login(1)
     with pytest.raises(RuntimeError, match="active request"):
         Session.id()
     with pytest.raises(RuntimeError, match="active request"):
@@ -134,7 +134,7 @@ async def test_concurrent_requests_keep_separate_facade_contexts(facade_app):
         if arrivals == 2:
             ready.set()
         await asyncio.wait_for(ready.wait(), timeout=2)
-        return {"user_id": await AsyncAuth.id(), "session_id": Session.id()}
+        return {"user_id": await Auth.id(), "session_id": Session.id()}
 
     first = new_session_record(user_id=1, guard="web", ttl=60)
     second = new_session_record(user_id=2, guard="web", ttl=60)

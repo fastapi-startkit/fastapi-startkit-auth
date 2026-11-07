@@ -11,6 +11,23 @@ Release notes are also published on
 
 Each item lists what changed and what to do.
 
+- **The package is async-only; every sync class is removed.** The sync
+  `Auth`, `SessionGuard`, `PassportGuard`, `TokenGuard`, `ChainGuard`,
+  `TokenService`, `ApiTokenManager`, `PasswordBroker`, `PasswordGrant`,
+  `ClientCredentialsGrant`, `AuthorizationCodeGrant`, `RefreshTokenGrant`,
+  `ModelUserProvider` and `UserProvider` are gone, and each `Async*` class now
+  carries the plain name (`AsyncAuth` is `Auth`, `AsyncTokenService` is
+  `TokenService`, and so on). `user_is_active_async`, `find_user_async`,
+  `active_user_async` and `AuthManager.owner_provider_async` lose their
+  `_async` suffix; `AuthManager.owner_provider` is now a coroutine.
+  `AsyncMisconfiguration`, `ensure_sync`, `is_async_provider`,
+  `guard_is_async`, `is_async` and `has_async_methods` are removed, and the
+  `"async_model"` provider driver is dropped in favour of `"model"`.
+  `InMemoryUserProvider` methods are coroutines. User-supplied stores,
+  listeners and `is_active` hooks may still be sync; they run in the
+  threadpool. *Migrate:* import the plain names, `await` every `Auth`, guard,
+  provider, broker, grant and token-service call, and change
+  `driver="async_model"` to `driver="model"`.
 - **Feature providers replace `Application` and `AuthServiceProvider`.**
   Register `AuthProvider` first, then the features your guards use:
   `AuthSessionProvider(SessionConfig)`, `AuthOAuth2Provider(OAuth2Config)` and

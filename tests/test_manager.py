@@ -31,38 +31,38 @@ def test_manager_resolves_default_guard(manager):
     assert guard.name == "api"
 
 
-def test_manager_resolves_named_provider(manager):
+async def test_manager_resolves_named_provider(manager):
     provider = manager.provider("users")
-    assert provider.retrieve_by_id(1)["email"] == "ada@example.com"
+    assert (await provider.retrieve_by_id(1))["email"] == "ada@example.com"
 
 
-def test_guard_authenticates_issued_token(manager):
-    issued = manager.token_service.issue(user_id=1, client_id="c1", scopes=["read"])
-    ctx = manager.guard().user_from_token(issued.access_token)
+async def test_guard_authenticates_issued_token(manager):
+    issued = await manager.token_service.issue(user_id=1, client_id="c1", scopes=["read"])
+    ctx = await manager.guard().user_from_token(issued.access_token)
     assert ctx.user["email"] == "ada@example.com"
     assert ctx.scopes == ["read"]
     assert ctx.can("read") is True
     assert ctx.can("write") is False
 
 
-def test_guard_rejects_revoked_token(manager):
-    issued = manager.token_service.issue(user_id=1, client_id="c1", scopes=["read"])
-    manager.token_service.revoke_access(manager.token_service.authenticate(issued.access_token)["jti"])
+async def test_guard_rejects_revoked_token(manager):
+    issued = await manager.token_service.issue(user_id=1, client_id="c1", scopes=["read"])
+    await manager.token_service.revoke_access((await manager.token_service.authenticate(issued.access_token))["jti"])
     with pytest.raises(InvalidTokenException):
-        manager.guard().user_from_token(issued.access_token)
+        await manager.guard().user_from_token(issued.access_token)
 
 
-def test_manager_builds_password_broker(manager):
+async def test_manager_builds_password_broker(manager):
     broker = manager.broker()
-    token = broker.send_reset_link("ada@example.com")
-    assert broker.reset("ada@example.com", token, "new-secret") is True
+    token = await broker.send_reset_link("ada@example.com")
+    assert await broker.reset("ada@example.com", token, "new-secret") is True
 
 
-def test_manager_exposes_grants(manager):
-    issued = manager.password_grant().handle(
+async def test_manager_exposes_grants(manager):
+    issued = await manager.password_grant().handle(
         username="ada@example.com", password="secret", scopes=["read"], client_id="c1"
     )
-    assert manager.guard().user_from_token(issued.access_token).user["id"] == 1
+    assert (await manager.guard().user_from_token(issued.access_token)).user["id"] == 1
 
 
 def test_config_defaults_are_readable_without_subclass_overrides():

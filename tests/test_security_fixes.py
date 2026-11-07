@@ -65,10 +65,10 @@ def test_password_grant_same_error_for_unknown_user_and_wrong_password(auth_clie
     assert wrong_pw.json() == unknown.json()  # same generic invalid_grant
 
 
-def test_provider_dummy_verify_exists():
+async def test_provider_dummy_verify_exists():
     provider = InMemoryUserProvider(hasher=BcryptHasher(rounds=4))
     assert callable(getattr(provider, "dummy_verify", None))
-    provider.dummy_verify()  # must not raise
+    await provider.dummy_verify()  # must not raise
 
 
 # --- Finding 2: PKCE enforced for public clients -------------------------
@@ -85,7 +85,7 @@ def test_public_client_cannot_get_code_without_pkce(auth_client):
     assert resp.json()["error"] == "invalid_request"
 
 
-def test_exchange_rejects_challengeless_code_without_client_auth():
+async def test_exchange_rejects_challengeless_code_without_client_auth():
     """Defense-in-depth: even a stored code with no challenge cannot be redeemed
     by an unauthenticated (public) client."""
     svc = TokenService(encoder=JWTEncoder(secret="x" * 40), repository=InMemoryTokenRepository())
@@ -95,7 +95,7 @@ def test_exchange_rejects_challengeless_code_without_client_auth():
         code="leaked", client_id="pub", user_id=1, scopes=["read"], redirect_uri="https://spa/cb",
         code_challenge=None, code_challenge_method=None, expires_at=time.time() + 60)
     with pytest.raises(InvalidGrantException):
-        grant.handle(client=public, code="leaked", redirect_uri="https://spa/cb",
+        await grant.handle(client=public, code="leaked", redirect_uri="https://spa/cb",
                      code_verifier=None, client_authenticated=False)
 
 

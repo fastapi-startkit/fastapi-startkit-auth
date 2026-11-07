@@ -33,59 +33,59 @@ def users():
 
 
 # --- password grant ------------------------------------------------------
-def test_password_grant_issues_tokens(service, users):
+async def test_password_grant_issues_tokens(service, users):
     grant = PasswordGrant(service, users)
-    issued = grant.handle(username="ada", password="secret", scopes=["read"], client_id="c1")
+    issued = await grant.handle(username="ada", password="secret", scopes=["read"], client_id="c1")
     assert issued.refresh_token is not None
-    assert service.authenticate(issued.access_token)["sub"] == "1"
+    assert (await service.authenticate(issued.access_token))["sub"] == "1"
 
 
-def test_password_grant_rejects_bad_password(service, users):
+async def test_password_grant_rejects_bad_password(service, users):
     grant = PasswordGrant(service, users)
     with pytest.raises(InvalidGrantException):
-        grant.handle(username="ada", password="wrong", scopes=[], client_id="c1")
+        await grant.handle(username="ada", password="wrong", scopes=[], client_id="c1")
 
 
-def test_password_grant_rejects_unknown_user(service, users):
+async def test_password_grant_rejects_unknown_user(service, users):
     grant = PasswordGrant(service, users)
     with pytest.raises(InvalidGrantException):
-        grant.handle(username="ghost", password="secret", scopes=[], client_id="c1")
+        await grant.handle(username="ghost", password="secret", scopes=[], client_id="c1")
 
 
 # --- client credentials --------------------------------------------------
-def test_client_credentials_issues_token_without_user_or_refresh(service):
+async def test_client_credentials_issues_token_without_user_or_refresh(service):
     grant = ClientCredentialsGrant(service)
     client = Client(id="c1", name="svc", confidential=True)
-    issued = grant.handle(client=client, scopes=["read"])
+    issued = await grant.handle(client=client, scopes=["read"])
     assert issued.refresh_token is None
-    claims = service.authenticate(issued.access_token)
+    claims = await service.authenticate(issued.access_token)
     assert claims["sub"] is None
     assert claims["client_id"] == "c1"
 
 
 # --- refresh -------------------------------------------------------------
-def test_refresh_grant(service, users):
-    issued = PasswordGrant(service, users).handle(username="ada", password="secret", scopes=["read"], client_id="c1")
-    rotated = RefreshTokenGrant(service).handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")
+async def test_refresh_grant(service, users):
+    issued = await PasswordGrant(service, users).handle(username="ada", password="secret", scopes=["read"], client_id="c1")
+    rotated = await RefreshTokenGrant(service).handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")
     assert rotated.access_token != issued.access_token
 
 
-def test_refresh_grant_refuses_another_client_or_no_client(service, users):
-    issued = PasswordGrant(service, users).handle(username="ada", password="secret", scopes=["read"], client_id="c1")
+async def test_refresh_grant_refuses_another_client_or_no_client(service, users):
+    issued = await PasswordGrant(service, users).handle(username="ada", password="secret", scopes=["read"], client_id="c1")
     grant = RefreshTokenGrant(service)
 
     for client_id in ("c2", None):
         with pytest.raises(InvalidGrantException):
-            grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=client_id)
-    assert grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1").access_token
+            await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id=client_id)
+    assert (await grant.handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")).access_token
 
 
-def test_refresh_grant_refuses_a_client_for_a_clientless_token(service, users):
-    issued = PasswordGrant(service, users).handle(username="ada", password="secret", scopes=["read"], client_id=None)
+async def test_refresh_grant_refuses_a_client_for_a_clientless_token(service, users):
+    issued = await PasswordGrant(service, users).handle(username="ada", password="secret", scopes=["read"], client_id=None)
 
     with pytest.raises(InvalidGrantException):
-        RefreshTokenGrant(service).handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")
-    assert RefreshTokenGrant(service).handle(refresh_token=issued.refresh_token, scopes=None).access_token
+        await RefreshTokenGrant(service).handle(refresh_token=issued.refresh_token, scopes=None, client_id="c1")
+    assert (await RefreshTokenGrant(service).handle(refresh_token=issued.refresh_token, scopes=None)).access_token
 
 
 # --- authorization code + PKCE ------------------------------------------
@@ -100,11 +100,11 @@ def test_pkce_verify_plain():
     assert verify_pkce("plainverifier", "other", "plain") is False
 
 
-def test_authorization_code_flow_with_pkce(service, s256):
+async def test_authorization_code_flow_with_pkce(service, s256):
     grant = AuthorizationCodeGrant(service)
     client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
     verifier = "verifier-verifier-verifier-verifier-1234567890"
-    code = grant.issue_code(
+    code = await grant.issue_code(
         client=client,
         user_id=1,
         scopes=["read"],
@@ -112,48 +112,15 @@ def test_authorization_code_flow_with_pkce(service, s256):
         code_challenge=s256(verifier),
         code_challenge_method="S256",
     )
-    issued = grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier=verifier)
-    assert service.authenticate(issued.access_token)["sub"] == "1"
+    issued = await grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier=verifier)
+    assert (await service.authenticate(issued.access_token))["sub"] == "1"
 
 
-def test_authorization_code_rejects_bad_verifier(service, s256):
+async def test_authorization_code_rejects_bad_verifier(service, s256):
     grant = AuthorizationCodeGrant(service)
     client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
     verifier = "verifier-verifier-verifier-verifier-1234567890"
-    code = grant.issue_code(
-        client=client,
-        user_id=1,
-        scopes=["read"],
-        redirect_uri="https://spa/cb",
-        code_challenge=s256(verifier),
-        code_challenge_method="S256",
-    )
-    with pytest.raises(InvalidGrantException):
-        grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier="attacker")
-
-
-def test_authorization_code_is_single_use(service, s256):
-    grant = AuthorizationCodeGrant(service)
-    client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
-    verifier = "verifier-verifier-verifier-verifier-1234567890"
-    code = grant.issue_code(
-        client=client,
-        user_id=1,
-        scopes=["read"],
-        redirect_uri="https://spa/cb",
-        code_challenge=s256(verifier),
-        code_challenge_method="S256",
-    )
-    grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier=verifier)
-    with pytest.raises(InvalidGrantException):
-        grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier=verifier)
-
-
-def test_authorization_code_rejects_redirect_uri_mismatch(service, s256):
-    grant = AuthorizationCodeGrant(service)
-    client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
-    verifier = "verifier-verifier-verifier-verifier-1234567890"
-    code = grant.issue_code(
+    code = await grant.issue_code(
         client=client,
         user_id=1,
         scopes=["read"],
@@ -162,4 +129,37 @@ def test_authorization_code_rejects_redirect_uri_mismatch(service, s256):
         code_challenge_method="S256",
     )
     with pytest.raises(InvalidGrantException):
-        grant.handle(client=client, code=code, redirect_uri="https://evil/cb", code_verifier=verifier)
+        await grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier="attacker")
+
+
+async def test_authorization_code_is_single_use(service, s256):
+    grant = AuthorizationCodeGrant(service)
+    client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
+    verifier = "verifier-verifier-verifier-verifier-1234567890"
+    code = await grant.issue_code(
+        client=client,
+        user_id=1,
+        scopes=["read"],
+        redirect_uri="https://spa/cb",
+        code_challenge=s256(verifier),
+        code_challenge_method="S256",
+    )
+    await grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier=verifier)
+    with pytest.raises(InvalidGrantException):
+        await grant.handle(client=client, code=code, redirect_uri="https://spa/cb", code_verifier=verifier)
+
+
+async def test_authorization_code_rejects_redirect_uri_mismatch(service, s256):
+    grant = AuthorizationCodeGrant(service)
+    client = Client(id="c1", name="spa", confidential=False, redirect_uris=["https://spa/cb"])
+    verifier = "verifier-verifier-verifier-verifier-1234567890"
+    code = await grant.issue_code(
+        client=client,
+        user_id=1,
+        scopes=["read"],
+        redirect_uri="https://spa/cb",
+        code_challenge=s256(verifier),
+        code_challenge_method="S256",
+    )
+    with pytest.raises(InvalidGrantException):
+        await grant.handle(client=client, code=code, redirect_uri="https://evil/cb", code_verifier=verifier)

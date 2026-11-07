@@ -4,11 +4,11 @@ import secrets
 import warnings
 from typing import Any, Callable
 
-from .apitokens.manager import ApiTokenManager, AsyncApiTokenManager
+from .apitokens.manager import ApiTokenManager
 from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
 from .clients.models import Client
 from .clients.repository import InMemoryClientRepository
-from .concurrency import call, ensure_sync, has_async_methods
+from .concurrency import call
 from .config import (
     DEPRECATED_OAUTH2_ATTRIBUTES,
     ApiTokenConfig,
@@ -19,25 +19,25 @@ from .config import (
     config_values,
     resolve_config,
 )
-from .grants.authorization_code import AsyncAuthorizationCodeGrant, AuthorizationCodeGrant
-from .grants.client_credentials import AsyncClientCredentialsGrant, ClientCredentialsGrant
-from .grants.password import AsyncPasswordGrant, PasswordGrant
-from .grants.refresh import AsyncRefreshTokenGrant, RefreshTokenGrant
-from .guards.chain import AsyncChainGuard, ChainGuard, guard_is_async
-from .guards.guard import AsyncPassportGuard, Guard, PassportGuard
-from .guards.session import AsyncSessionGuard, SessionGuard
-from .guards.token import AsyncTokenGuard, TokenGuard
-from .passwords.broker import AsyncPasswordBroker, PasswordBroker
+from .grants.authorization_code import AuthorizationCodeGrant
+from .grants.client_credentials import ClientCredentialsGrant
+from .grants.password import PasswordGrant
+from .grants.refresh import RefreshTokenGrant
+from .guards.chain import ChainGuard
+from .guards.guard import PassportGuard, Guard
+from .guards.session import SessionGuard
+from .guards.token import TokenGuard
+from .passwords.broker import PasswordBroker
 from .passwords.repository import InMemoryPasswordResetRepository
 from .policy import GrantPolicy
-from .providers.base import UserProvider, active_user_async, is_async_provider
+from .providers.base import UserProvider, active_user
 from .providers.memory import InMemoryUserProvider
-from .providers.model import AsyncModelUserProvider, ModelUserProvider
+from .providers.model import ModelUserProvider
 from .security.hashing import BcryptHasher
 from .security.jwt import JWTEncoder
 from .sessions.store import InMemorySessionStore, SessionStore
 from .tokens.repository import InMemoryTokenRepository
-from .tokens.service import AsyncTokenService, TokenService
+from .tokens.service import TokenService
 
 GuardFactory = Callable[[str, dict[str, Any]], Guard]
 AuthenticatedListener = Callable[[Any, Any, str | None], Any]
@@ -48,8 +48,6 @@ FEATURE_PROVIDERS = {
     "passport": "AuthOAuth2Provider",
     "token": "AuthApiTokenProvider",
 }
-
-SESSION_GUARDS = (SessionGuard, AsyncSessionGuard)
 
 _REMOVED_STORES = ("sql", "async_sql")
 
@@ -88,7 +86,7 @@ class AuthManager:
         self._providers: dict[str, UserProvider] = {
             name: self._build_provider(spec) for name, spec in cfg.get("providers", {}).items()
         }
-        self._brokers: dict[str, PasswordBroker | AsyncPasswordBroker] = {
+        self._brokers: dict[str, PasswordBroker] = {
             name: self._build_broker(spec) for name, spec in cfg.get("passwords", {}).items()
         }
         self._guard_drivers: dict[str, GuardFactory] = {"chain": self._build_chain_guard}
@@ -97,7 +95,7 @@ class AuthManager:
         self._session_store: SessionStore | None = None
         self._oauth2_config: OAuth2Config | None = None
         self._api_token_config: ApiTokenConfig | None = None
-        self._api_tokens: ApiTokenManager | AsyncApiTokenManager | None = None
+        self._api_tokens: ApiTokenManager | None = None
         self.csrf_exempt_paths: list[str] = []
         self._authenticated_listeners: list[AuthenticatedListener] = []
 
@@ -132,8 +130,7 @@ class AuthManager:
             require_redirect_uri=oauth2.require_redirect_uri,
         )
         self.token_repository = self._build_token_repository(oauth2)
-        token_service_class = AsyncTokenService if has_async_methods(self.token_repository) else TokenService
-        self.token_service = token_service_class(
+        self.token_service = TokenService(
             encoder=self.encoder,
             repository=self.token_repository,
             access_ttl=oauth2.access_token_ttl,
@@ -213,7 +210,7 @@ class AuthManager:
                     "SPA authentication (ApiTokenConfig.stateful_origins)", "AuthSessionProvider"
                 )
             name = self.api_token_config.session_guard
-            if not isinstance(guards.get(name), SESSION_GUARDS):
+            if not isinstance(guards.get(name), SessionGuard):
                 raise ValueError(
                     f"ApiTokenConfig.session_guard {name!r} must name a session guard in AuthConfig.guards."
                 )
@@ -266,8 +263,7 @@ class AuthManager:
                 "no token can be issued for it.",
                 stacklevel=2,
             )
-        guard_class = AsyncPassportGuard if is_async_provider(provider) or self._tokens_async() else PassportGuard
-        return guard_class(
+        return PassportGuard(
             name=name,
             token_service=self.token_service,
             provider=provider,
@@ -283,24 +279,15 @@ class AuthManager:
                 "Enable it in production.",
                 stacklevel=2,
             )
-        store = self.session_store
-        guard_class = AsyncSessionGuard if is_async_provider(provider) or has_async_methods(store) else SessionGuard
-        return guard_class(name=name, store=store, provider=provider, ttl=self.session_config.ttl)
+        return SessionGuard(name=name, store=self.session_store, provider=provider, ttl=self.session_config.ttl)
 
     def _build_token_guard(self, name: str, spec: dict[str, Any]) -> Guard:
         provider = self._require_provider(spec.get("provider"))
         config = self.api_token_config
         session_guard = config.session_guard if config.stateful else None
-        tokens = self.api_tokens
-        session_async = session_guard is not None and has_async_methods(self.session_store)
-        guard_class = (
-            AsyncTokenGuard
-            if is_async_provider(provider) or isinstance(tokens, AsyncApiTokenManager) or session_async
-            else TokenGuard
-        )
-        return guard_class(
+        return TokenGuard(
             name=name,
-            tokens=tokens,
+            tokens=self.api_tokens,
             provider=provider,
             header=config.header,
             session_guard=(lambda: self.guard(session_guard)) if session_guard else None,
@@ -315,8 +302,7 @@ class AuthManager:
             if member_spec["driver"] == "chain":
                 raise ValueError(f"Chain guard {name!r} cannot include the chain guard {member!r}.")
             members.append(self._build_guard(member, member_spec))
-        guard_class = AsyncChainGuard if any(guard_is_async(member) for member in members) else ChainGuard
-        return guard_class(name=name, guards=members)
+        return ChainGuard(name=name, guards=members)
 
     def guard(self, name: str | None = None) -> Guard:
         name = name or self.default_guard_name()
@@ -331,14 +317,14 @@ class AuthManager:
             None,
         )
 
-    def session_guard(self, name: str | None = None) -> SessionGuard | AsyncSessionGuard:
+    def session_guard(self, name: str | None = None) -> SessionGuard:
         if name is not None:
             guard: Any = self.guard(name)
         elif self.default_guard_is_session():
             guard = self.guard()
         else:
-            guard = next((g for g in self._all_guards().values() if isinstance(g, SESSION_GUARDS)), None)
-        if not isinstance(guard, SESSION_GUARDS):
+            guard = next((g for g in self._all_guards().values() if isinstance(g, SessionGuard)), None)
+        if not isinstance(guard, SessionGuard):
             raise RuntimeError(
                 f"Auth guard {name or self.default_guard_name()!r} is not a session guard; "
                 "login and logout require a session guard registered by AuthSessionProvider."
@@ -346,10 +332,10 @@ class AuthManager:
         return guard
 
     def default_guard_is_session(self) -> bool:
-        return isinstance(self._all_guards().get(self.default_guard_name()), SESSION_GUARDS)
+        return isinstance(self._all_guards().get(self.default_guard_name()), SessionGuard)
 
     def session_guard_name(self) -> str | None:
-        return next((name for name, guard in self._all_guards().items() if isinstance(guard, SESSION_GUARDS)), None)
+        return next((name for name, guard in self._all_guards().items() if isinstance(guard, SessionGuard)), None)
 
     def has_session_guard(self) -> bool:
         return self.session_guard_name() is not None
@@ -378,12 +364,11 @@ class AuthManager:
         raise ValueError(f"Unknown session store: {config.driver!r}")
 
     @property
-    def api_tokens(self) -> ApiTokenManager | AsyncApiTokenManager:
+    def api_tokens(self) -> ApiTokenManager:
         if self._api_tokens is None:
             config = self.api_token_config
             repository = self._build_api_token_repository(config)
-            manager_class = AsyncApiTokenManager if has_async_methods(repository) else ApiTokenManager
-            self._api_tokens = manager_class(
+            self._api_tokens = ApiTokenManager(
                 repository=repository, default_ttl=config.ttl, purge_interval=config.purge_interval
             )
         return self._api_tokens
@@ -443,9 +428,8 @@ class AuthManager:
             for user in spec.get("users", []):
                 provider.add(user)
             return provider
-        if driver in ("masoniteorm", "orm", "model", "async_model"):
-            provider_class = AsyncModelUserProvider if driver == "async_model" else ModelUserProvider
-            return provider_class(
+        if driver in ("masoniteorm", "orm", "model"):
+            return ModelUserProvider(
                 model=spec["model"],
                 hasher=self.hasher,
                 username_field=spec.get("username_field", "email"),
@@ -456,10 +440,9 @@ class AuthManager:
             )
         raise ValueError(f"Unknown user provider driver: {driver!r}")
 
-    def _build_broker(self, spec: dict[str, Any]) -> PasswordBroker | AsyncPasswordBroker:
+    def _build_broker(self, spec: dict[str, Any]) -> PasswordBroker:
         provider = self._resolve_broker_provider(spec.get("provider"))
-        broker_class = AsyncPasswordBroker if is_async_provider(provider) else PasswordBroker
-        return broker_class(
+        return PasswordBroker(
             user_provider=provider,
             repository=InMemoryPasswordResetRepository(),
             hasher=self.hasher,
@@ -484,7 +467,7 @@ class AuthManager:
     def provider(self, name: str) -> UserProvider:
         return self._require_provider(name)
 
-    def broker(self, name: str | None = None) -> PasswordBroker | AsyncPasswordBroker:
+    def broker(self, name: str | None = None) -> PasswordBroker:
         name = name or self._config.get("default", {}).get("passwords")
         if name not in self._brokers:
             raise ValueError(f"Password broker {name!r} is not defined in AuthConfig.passwords")
@@ -520,21 +503,6 @@ class AuthManager:
         self.grant_policy.check_scopes(requested)
         return list(dict.fromkeys(requested))
 
-    def _tokens_async(self) -> bool:
-        return isinstance(self.token_service, AsyncTokenService)
-
-    def _grants_async(self, provider: Any) -> bool:
-        return self._tokens_async() or (provider is not None and is_async_provider(provider))
-
-    def _owner_grants_async(self) -> bool:
-        # Owner re-checks resolve their provider per token, so any async
-        # provider or client store requires the async grant.
-        return (
-            self._tokens_async()
-            or has_async_methods(self.client_repository)
-            or any(is_async_provider(p) for p in self._providers.values())
-        )
-
     def _default_owner_provider(self) -> Any:
         if self.authorization_guard_name not in self._guard_specs:
             return None
@@ -550,38 +518,28 @@ class AuthManager:
             return self._require_provider(client.provider)
         return self._default_owner_provider()
 
-    def owner_provider(self, client_id: str | None = None) -> Any:
-        client = ensure_sync(self.client_repository.find(client_id), "The client store's find") if client_id else None
-        return self.provider_for_client(client)
-
-    async def owner_provider_async(self, client_id: str | None = None) -> Any:
+    async def owner_provider(self, client_id: str | None = None) -> Any:
         client = await call(self.client_repository.find, client_id) if client_id else None
         return self.provider_for_client(client)
 
-    def password_grant(self, guard: str | None = None, client: Client | None = None) -> PasswordGrant | AsyncPasswordGrant:
+    def password_grant(self, guard: str | None = None, client: Client | None = None) -> PasswordGrant:
         provider = self.provider_for_client(client) if client is not None and client.provider else None
         if provider is None:
             provider = self.guard(guard).provider
-        grant_class = AsyncPasswordGrant if self._grants_async(provider) else PasswordGrant
-        return grant_class(self.token_service, provider, self.grant_policy, client)
+        return PasswordGrant(self.token_service, provider, self.grant_policy, client)
 
-    def client_credentials_grant(self) -> ClientCredentialsGrant | AsyncClientCredentialsGrant:
-        grant_class = AsyncClientCredentialsGrant if self._tokens_async() else ClientCredentialsGrant
-        return grant_class(self.token_service, self.grant_policy)
+    def client_credentials_grant(self) -> ClientCredentialsGrant:
+        return ClientCredentialsGrant(self.token_service, self.grant_policy)
 
-    def refresh_grant(self) -> RefreshTokenGrant | AsyncRefreshTokenGrant:
-        if self._owner_grants_async():
-            return AsyncRefreshTokenGrant(self.token_service, owner_provider=self.owner_provider_async)
+    def refresh_grant(self) -> RefreshTokenGrant:
         return RefreshTokenGrant(self.token_service, owner_provider=self.owner_provider)
 
-    def authorization_code_grant(self) -> AuthorizationCodeGrant | AsyncAuthorizationCodeGrant:
-        code_ttl = self.oauth2_config.authorization_code_ttl
-        if self._owner_grants_async():
-            return AsyncAuthorizationCodeGrant(
-                self.token_service, code_ttl=code_ttl, owner_provider=self.owner_provider_async, policy=self.grant_policy
-            )
+    def authorization_code_grant(self) -> AuthorizationCodeGrant:
         return AuthorizationCodeGrant(
-            self.token_service, code_ttl=code_ttl, owner_provider=self.owner_provider, policy=self.grant_policy
+            self.token_service,
+            code_ttl=self.oauth2_config.authorization_code_ttl,
+            owner_provider=self.owner_provider,
+            policy=self.grant_policy,
         )
 
     async def introspect(self, token: str) -> dict[str, Any]:
@@ -589,8 +547,8 @@ class AuthManager:
         sub = result.get("sub") if result.get("active") else None
         if sub is None:
             return result
-        provider = await self.owner_provider_async(result.get("client_id"))
-        if provider is not None and await active_user_async(provider, sub) is None:
+        provider = await self.owner_provider(result.get("client_id"))
+        if provider is not None and await active_user(provider, sub) is None:
             return {"active": False}
         return result
 
@@ -604,4 +562,3 @@ class AuthManager:
             warm_up = getattr(provider, "warm_up", None)
             if callable(warm_up):
                 await call(warm_up)
-

@@ -4,9 +4,8 @@ import asyncio
 import secrets
 from typing import Any, Callable
 
-from ..concurrency import call, ensure_sync
+from ..concurrency import call
 from ..exceptions import InvalidGrantException, ThrottleException
-from ..providers.base import UserProvider
 from ..security.hashing import BcryptHasher, Hasher
 from .repository import InMemoryPasswordResetRepository
 
@@ -22,66 +21,6 @@ def _lookup(email: str) -> dict[str, str]:
 
 
 class PasswordBroker:
-    """Password reset flow backed by the ``password_reset_tokens`` table.
-
-    Tokens are stored hashed, expire after ``expire_minutes``, and are
-    rate-limited per user by ``throttle_seconds`` — matching Laravel's broker.
-    The plaintext token is returned from ``send_reset_link`` so the caller can
-    deliver it (e.g. by email); only its hash is persisted.
-    """
-
-    def __init__(
-        self,
-        user_provider: UserProvider,
-        repository: InMemoryPasswordResetRepository | None = None,
-        hasher: Hasher | None = None,
-        expire_minutes: int = 60,
-        throttle_seconds: int = 60,
-        notifier: Callable[[str, str], None] | None = None,
-    ) -> None:
-        self._users = user_provider
-        self._repo = repository or InMemoryPasswordResetRepository()
-        self._hasher = hasher or BcryptHasher()
-        self._expire_minutes = expire_minutes
-        self._throttle_seconds = throttle_seconds
-        self._notifier = notifier
-
-    def _find_user(self, email: str):
-        return ensure_sync(self._users.retrieve_by_credentials(_lookup(email)), "retrieve_by_credentials")
-
-    def send_reset_link(self, email: str) -> str:
-        user = self._find_user(email)
-        if user is None:
-            # Do equivalent hashing work before failing so response timing does
-            # not reveal whether the email is registered.
-            self._hasher.make(secrets.token_urlsafe(40))
-            raise InvalidGrantException(_UNKNOWN_EMAIL)
-        if self._repo.recently_created(email, self._throttle_seconds):
-            raise ThrottleException(_THROTTLED)
-        token = secrets.token_urlsafe(40)
-        self._repo.create(email, self._hasher.make(token))
-        if self._notifier is not None:
-            self._notifier(email, token)
-        return token
-
-    def reset(self, email: str, token: str, new_password: str) -> bool:
-        record = self._repo.find(email)
-        if record is None:
-            raise InvalidGrantException(_INVALID_TOKEN)
-        if record.age() > self._expire_minutes * 60:
-            self._repo.delete(email)
-            raise InvalidGrantException(_EXPIRED_TOKEN)
-        if not self._hasher.verify(token, record.hashed_token):
-            raise InvalidGrantException(_INVALID_TOKEN)
-        user = self._find_user(email)
-        if user is None:
-            raise InvalidGrantException(_UNKNOWN_EMAIL)
-        ensure_sync(self._users.update_password(user, new_password), "update_password")
-        self._repo.delete(email)
-        return True
-
-
-class AsyncPasswordBroker:
     def __init__(
         self,
         user_provider: Any,

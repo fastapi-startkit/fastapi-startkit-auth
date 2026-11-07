@@ -1,7 +1,7 @@
 import pytest
 from fastapi import Body, Depends, FastAPI, Request
 
-from fastapi_startkit_auth import AsyncAuth, AsyncChainGuard, Auth, AuthConfig, ChainGuard, GuardDependency
+from fastapi_startkit_auth import Auth, ChainGuard, AuthConfig, GuardDependency
 from fastapi_startkit_auth.config import ChainGuard as ChainGuardConfig
 from fastapi_startkit_auth.config import ApiTokenGuard, OAuth2Guard, SessionGuard
 from fastapi_startkit_auth.exceptions import AuthException, InvalidTokenException
@@ -24,8 +24,8 @@ def guarded_app():
     manager = register_auth(api, session_config(guards=GUARDS, default_guard="api"), session={}, oauth2=oauth2_config())
 
     @api.post("/login")
-    def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
-        return {"ok": auth.attempt(payload, guard="web")}
+    async def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
+        return {"ok": await auth.attempt(payload, guard="web")}
 
     @api.get("/me")
     def me(user=Depends(Auth.guard("auth.api"))):
@@ -42,14 +42,14 @@ def guarded_app():
     return api, manager
 
 
-def bearer(manager, user_id=1, client_id=None):
-    issued = manager.token_service.issue(user_id=user_id, client_id=client_id, scopes=["*"])
+async def bearer(manager, user_id=1, client_id=None):
+    issued = await manager.token_service.issue(user_id=user_id, client_id=client_id, scopes=["*"])
     return {"Authorization": f"Bearer {issued.access_token}"}
 
 
 def test_guard_on_the_class_is_a_dependency_keyed_by_name():
     assert isinstance(Auth.guard("auth.api"), GuardDependency)
-    assert Auth.guard("auth.api") == AsyncAuth.guard("auth.api")
+    assert Auth.guard("auth.api") == Auth.guard("auth.api")
     assert hash(Auth.guard("auth.api")) == hash(Auth.guard("auth.api"))
     assert Auth.guard("api") != Auth.guard("auth.api")
 
@@ -61,18 +61,18 @@ def test_guard_on_an_instance_is_the_configured_guard():
     assert isinstance(auth.guard("auth.api"), ChainGuard)
 
 
-def test_valid_bearer_token_resolves_the_user(guarded_app):
+async def test_valid_bearer_token_resolves_the_user(guarded_app):
     api, manager = guarded_app
     client = TestClient(api, base_url="https://testserver")
-    response = client.get("/me", headers=bearer(manager, user_id=2))
+    response = client.get("/me", headers=await bearer(manager, user_id=2))
     assert response.status_code == 200
     assert response.json() == {"id": 2}
 
 
-def test_default_guard_dependency_uses_the_default_guard(guarded_app):
+async def test_default_guard_dependency_uses_the_default_guard(guarded_app):
     api, manager = guarded_app
     client = TestClient(api, base_url="https://testserver")
-    assert client.get("/default", headers=bearer(manager)).json() == {"id": 1}
+    assert client.get("/default", headers=await bearer(manager)).json() == {"id": 1}
 
 
 def test_missing_credentials_are_rejected_with_401(guarded_app):
@@ -88,9 +88,9 @@ def test_invalid_bearer_token_is_rejected_with_401(guarded_app):
     assert response.json()["error"] == "invalid_token"
 
 
-def test_client_credentials_token_without_a_user_is_rejected(guarded_app):
+async def test_client_credentials_token_without_a_user_is_rejected(guarded_app):
     api, manager = guarded_app
-    issued = manager.token_service.issue(user_id=None, client_id="machine", scopes=["*"])
+    issued = await manager.token_service.issue(user_id=None, client_id="machine", scopes=["*"])
     response = TestClient(api, base_url="https://testserver").get(
         "/bearer-only", headers={"Authorization": f"Bearer {issued.access_token}"}
     )
@@ -114,7 +114,7 @@ def test_a_rejected_bearer_token_does_not_fall_back_to_the_session(guarded_app):
     assert response.json()["error"] == "invalid_token"
 
 
-def test_a_first_party_only_guard_refuses_tokens_issued_to_a_client():
+async def test_a_first_party_only_guard_refuses_tokens_issued_to_a_client():
     guards = {"api": OAuth2Guard(provider="users", first_party_only=True)}
     api = FastAPI()
     manager = register_auth(api, session_config(guards=guards, default_guard="api"), session={}, oauth2=oauth2_config())
@@ -124,23 +124,23 @@ def test_a_first_party_only_guard_refuses_tokens_issued_to_a_client():
         return {"id": user["id"]}
 
     client = TestClient(api, base_url="https://testserver")
-    assert client.get("/me", headers=bearer(manager, user_id=2)).json() == {"id": 2}
-    response = client.get("/me", headers=bearer(manager, user_id=2, client_id="connector"))
+    assert client.get("/me", headers=await bearer(manager, user_id=2)).json() == {"id": 2}
+    response = client.get("/me", headers=await bearer(manager, user_id=2, client_id="connector"))
     assert response.status_code == 401
     assert response.json()["error"] == "invalid_token"
 
 
-def test_class_level_guard_inside_a_request_reads_through_to_the_guard(guarded_app):
+async def test_class_level_guard_inside_a_request_reads_through_to_the_guard(guarded_app):
     api, manager = guarded_app
-    token = manager.token_service.issue(user_id=2, client_id=None, scopes=["*"]).access_token
+    token = (await manager.token_service.issue(user_id=2, client_id=None, scopes=["*"])).access_token
 
     @api.get("/probe")
-    def probe():
+    async def probe():
         guard = Auth.guard("api")
         return {
             "same_provider": guard.provider is manager.guard("api").provider,
-            "id": guard.user_from_token(token).user["id"],
-            "async_same_provider": AsyncAuth.guard("api").provider is manager.guard("api").provider,
+            "id": (await guard.user_from_token(token)).user["id"],
+            "async_same_provider": Auth.guard("api").provider is manager.guard("api").provider,
         }
 
     response = TestClient(api, base_url="https://testserver").get("/probe")
@@ -152,21 +152,21 @@ def test_class_level_guard_outside_a_request_explains_itself():
         Auth.guard("api").provider
 
 
-def test_chain_user_from_token_does_not_read_the_token_as_a_session_id(guarded_app):
+async def test_chain_user_from_token_does_not_read_the_token_as_a_session_id(guarded_app):
     api, manager = guarded_app
     client = TestClient(api, base_url="https://testserver")
     client.post("/login", json={"email": "grace@example.com", "password": "hopper"})
     session_id = client.cookies.get(manager.session_config.cookie)
     assert session_id
     with pytest.raises(AuthException):
-        manager.guard("auth.api").user_from_token(session_id)
+        await manager.guard("auth.api").user_from_token(session_id)
 
 
-def test_a_chain_of_only_session_members_rejects_token_lookups():
+async def test_a_chain_of_only_session_members_rejects_token_lookups():
     guards = {"web": SessionGuard(provider="users"), "auth.web": ChainGuardConfig(guards=["web"])}
     manager = auth_manager(session_config(guards=guards, default_guard="web"), session={}, oauth2=oauth2_config())
     with pytest.raises(InvalidTokenException):
-        manager.guard("auth.web").user_from_token("anything")
+        await manager.guard("auth.web").user_from_token("anything")
 
 
 def token_chain_app(header="Authorization"):
@@ -185,8 +185,8 @@ def token_chain_app(header="Authorization"):
     )
 
     @api.post("/login")
-    def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
-        return {"ok": auth.attempt(payload, guard="web")}
+    async def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
+        return {"ok": await auth.attempt(payload, guard="web")}
 
     @api.get("/me")
     def me(user=Depends(Auth.guard("auth.api"))):
@@ -197,19 +197,19 @@ def token_chain_app(header="Authorization"):
     return client, manager
 
 
-def test_a_rejected_api_token_does_not_fall_back_to_the_session():
+async def test_a_rejected_api_token_does_not_fall_back_to_the_session():
     client, manager = token_chain_app()
     assert client.get("/me").json() == {"id": 2}
     assert client.get("/me", headers={"Authorization": "Bearer 1|nope"}).status_code == 401
-    issued = manager.api_tokens.create(user_id=1)
+    issued = await manager.api_tokens.create(user_id=1)
     assert client.get("/me", headers={"Authorization": f"Bearer {issued.plain_text}"}).json() == {"id": 1}
 
 
-def test_a_rejected_api_token_in_a_custom_header_does_not_fall_back_to_the_session():
+async def test_a_rejected_api_token_in_a_custom_header_does_not_fall_back_to_the_session():
     client, manager = token_chain_app(header="X-Api-Token")
     assert client.get("/me").json() == {"id": 2}
     assert client.get("/me", headers={"X-Api-Token": "1|nope"}).status_code == 401
-    issued = manager.api_tokens.create(user_id=1)
+    issued = await manager.api_tokens.create(user_id=1)
     assert client.get("/me", headers={"X-Api-Token": issued.plain_text}).json() == {"id": 1}
 
 
@@ -219,7 +219,7 @@ def test_dependency_overrides_key_on_the_guard_name(guarded_app):
     assert TestClient(api, base_url="https://testserver").get("/me").json() == {"id": 99}
 
 
-def test_authenticated_listeners_receive_the_resolved_user_before_the_handler(guarded_app):
+async def test_authenticated_listeners_receive_the_resolved_user_before_the_handler(guarded_app):
     api, manager = guarded_app
     seen = []
 
@@ -233,7 +233,7 @@ def test_authenticated_listeners_receive_the_resolved_user_before_the_handler(gu
         return {"seen": request.state.seen_user}
 
     client = TestClient(api, base_url="https://testserver")
-    assert client.get("/seen", headers=bearer(manager, user_id=2)).json() == {"seen": 2}
+    assert client.get("/seen", headers=await bearer(manager, user_id=2)).json() == {"seen": 2}
     assert seen == [(2, "auth.api")]
 
 
@@ -271,7 +271,7 @@ def test_chain_guard_needs_a_member():
         manager.guard("empty")
 
 
-def test_async_members_build_an_async_chain_that_resolves_token_and_session(users):
+async def test_async_members_build_an_async_chain_that_resolves_token_and_session(users):
     class Config(AuthConfig):
         bcrypt_rounds = 4
         default = {"guard": "api", "passwords": "users"}
@@ -282,17 +282,17 @@ def test_async_members_build_an_async_chain_that_resolves_token_and_session(user
     manager = register_auth(api, Config, session={}, oauth2=oauth2_config())
 
     @api.post("/login-as/{user_id}")
-    async def login_as(user_id: int, auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+    async def login_as(user_id: int, auth: Auth = Depends(Auth.scoped)):
         await auth.login(user_id, guard="web")
         return {"ok": True}
 
     @api.get("/me")
-    async def me(user=Depends(AsyncAuth.guard("auth.api"))):
+    async def me(user=Depends(Auth.guard("auth.api"))):
         return {"id": user.id}
 
-    assert isinstance(manager.guard("auth.api"), AsyncChainGuard)
+    assert isinstance(manager.guard("auth.api"), ChainGuard)
     client = TestClient(api, base_url="https://testserver")
     assert client.get("/me").status_code == 401
-    assert client.get("/me", headers=bearer(manager)).json() == {"id": 1}
+    assert client.get("/me", headers=await bearer(manager)).json() == {"id": 1}
     client.post("/login-as/1")
     assert client.get("/me").json() == {"id": 1}

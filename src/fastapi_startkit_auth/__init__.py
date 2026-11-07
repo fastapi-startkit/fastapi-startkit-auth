@@ -8,10 +8,9 @@ Passport while staying idiomatic FastAPI:
 from __future__ import annotations
 
 from .apitokens.facade import ApiToken
-from .apitokens.manager import ApiTokenManager, AsyncApiTokenManager, NewApiToken
+from .apitokens.manager import ApiTokenManager, NewApiToken
 from .apitokens.models import ApiTokenRecord
 from .apitokens.repository import ApiTokenRepository, InMemoryApiTokenRepository
-from .concurrency import AsyncMisconfiguration
 from .clients.models import Client
 from .clients.repository import InMemoryClientRepository
 from .config import (
@@ -62,23 +61,23 @@ from .exceptions import (
     UnsupportedResponseTypeException,
 )
 from .policy import GrantPolicy
-from .facade import AsyncAuth, Auth
-from .guards.chain import AsyncChainGuard, ChainGuard
-from .guards.guard import AsyncPassportGuard, PassportGuard
-from .guards.session import AsyncSessionGuard, SessionGuard
-from .guards.token import AsyncTokenGuard, TokenGuard
+from .facade import Auth
+from .guards.chain import ChainGuard
+from .guards.guard import PassportGuard
+from .guards.session import SessionGuard
+from .guards.token import TokenGuard
 from .manager import AuthManager, FeatureNotRegistered
 from .middleware.context import AuthMiddleware
 from .middleware.csrf import CsrfMiddleware
 from .middleware.session import SessionMiddleware
-from .passwords.broker import AsyncPasswordBroker, PasswordBroker
+from .passwords.broker import PasswordBroker
 from .provider import AuthApiTokenProvider, AuthOAuth2Provider, AuthProvider, AuthSessionProvider
 from .providers.memory import InMemoryUserProvider
-from .providers.model import AsyncModelUserProvider, ModelUserProvider
+from .providers.model import ModelUserProvider
 from .sessions.facade import Session
 from .sessions.models import SessionRecord
 from .sessions.store import InMemorySessionStore, SessionStore
-from .tokens.service import AsyncTokenService, TokenService
+from .tokens.service import TokenService
 
 __version__ = "0.7.0"
 
@@ -115,7 +114,6 @@ __all__ = (
     "require_scopes",
     "require_abilities",
     "AuthException",
-    "AsyncMisconfiguration",
     "InvalidGrantException",
     "InvalidClientException",
     "InvalidCredentialsException",
@@ -152,21 +150,12 @@ __all__ = (
     "ApiTokenRecord",
     "ApiTokenRepository",
     "InMemoryApiTokenRepository",
-    "AsyncAuth",
     "PassportGuard",
-    "AsyncPassportGuard",
-    "AsyncSessionGuard",
-    "AsyncTokenGuard",
     "ChainGuard",
-    "AsyncChainGuard",
-    "AsyncApiTokenManager",
     "PasswordBroker",
-    "AsyncPasswordBroker",
     "InMemoryUserProvider",
     "ModelUserProvider",
-    "AsyncModelUserProvider",
     "TokenService",
-    "AsyncTokenService",
 )
 
 

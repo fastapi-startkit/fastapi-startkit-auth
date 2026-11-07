@@ -42,17 +42,17 @@ def build_model():
     return FakeUserModel, hasher
 
 
-def test_model_provider_retrieve_and_validate():
+async def test_model_provider_retrieve_and_validate():
     model, hasher = build_model()
     provider = ModelUserProvider(model=model, hasher=hasher)
-    user = provider.retrieve_by_credentials({"email": "ada@example.com"})
+    user = await provider.retrieve_by_credentials({"email": "ada@example.com"})
     assert user["id"] == 1
-    assert provider.validate_credentials(user, {"password": "secret"}) is True
-    assert provider.validate_credentials(user, {"password": "nope"}) is False
-    assert provider.get_identifier(provider.retrieve_by_id(1)) == 1
+    assert await provider.validate_credentials(user, {"password": "secret"}) is True
+    assert await provider.validate_credentials(user, {"password": "nope"}) is False
+    assert provider.get_identifier(await provider.retrieve_by_id(1)) == 1
 
 
-def test_manager_accepts_masoniteorm_driver_config():
+async def test_manager_accepts_masoniteorm_driver_config():
     model, hasher = build_model()
 
     class Config(AuthConfig):
@@ -63,7 +63,7 @@ def test_manager_accepts_masoniteorm_driver_config():
         passwords = {"users": {"provider": "users", "expire": 60, "throttle": 60}}
 
     manager = auth_manager(Config, oauth2=oauth2_config())
-    issued = manager.password_grant().handle(
+    issued = await manager.password_grant().handle(
         username="ada@example.com", password="secret", scopes=["read"], client_id=None
     )
-    assert manager.guard().user_from_token(issued.access_token).user["id"] == 1
+    assert (await manager.guard().user_from_token(issued.access_token)).user["id"] == 1

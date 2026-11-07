@@ -3,25 +3,24 @@ import pytest
 from fastapi import Body, Depends, FastAPI
 
 from fastapi_startkit_auth import (
-    AsyncAuth,
-    AsyncPassportGuard,
-    AsyncPasswordBroker,
-    AsyncSessionGuard,
-    AsyncTokenGuard,
-    AsyncTokenService,
     Auth,
+    PassportGuard,
+    PasswordBroker,
+    SessionGuard,
+    TokenGuard,
+    TokenService,
     AuthConfig,
     AuthenticationException,
     current_user,
     optional_user,
 )
 from fastapi_startkit_auth.grants import (
-    AsyncAuthorizationCodeGrant,
-    AsyncClientCredentialsGrant,
-    AsyncPasswordGrant,
-    AsyncRefreshTokenGrant,
+    AuthorizationCodeGrant,
+    ClientCredentialsGrant,
+    PasswordGrant,
+    RefreshTokenGrant,
 )
-from fastapi_startkit_auth.providers.model import AsyncModelUserProvider
+from fastapi_startkit_auth.providers.model import ModelUserProvider
 from fastapi_startkit_auth.security.hashing import BcryptHasher
 
 from conftest import PASSWORD_GRANTS, VERIFIER, auth_manager, oauth2_config, register_auth, s256_challenge
@@ -68,7 +67,7 @@ def users():
 
 
 USER_PROVIDER = {
-    "driver": "async_model",
+    "driver": "model",
     "model": AsyncUser,
     "password_field": "hashed_password",
     "password_key": "password",
@@ -106,23 +105,23 @@ def wire_routes(api):
         return user_json(user)
 
     @api.post("/login")
-    async def login(payload: dict = Body(...), auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+    async def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
         if not await auth.attempt(payload):
             raise AuthenticationException("Invalid credentials.")
         return {"ok": True}
 
     @api.post("/login-as/{user_id}")
-    async def login_as(user_id: int, auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+    async def login_as(user_id: int, auth: Auth = Depends(Auth.scoped)):
         record = await auth.login(user_id)
         return {"session_id": record.id}
 
     @api.post("/logout")
-    async def logout(auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+    async def logout(auth: Auth = Depends(Auth.scoped)):
         await auth.logout()
         return {"ok": True}
 
     @api.get("/status")
-    async def status(auth: AsyncAuth = Depends(AsyncAuth.scoped)):
+    async def status(auth: Auth = Depends(Auth.scoped)):
         return {"check": await auth.check(), "id": await auth.id(), "user": user_json(await auth.user())}
 
     @api.get("/sync-facade")
@@ -168,16 +167,16 @@ async def password_token(client, email="ada@example.com", password="secret", sco
 
 async def test_manager_selects_async_variants(app):
     _, manager = app
-    assert isinstance(manager.guard("api").provider, AsyncModelUserProvider)
-    assert isinstance(manager.guard("api"), AsyncPassportGuard)
-    assert isinstance(manager.guard("web"), AsyncSessionGuard)
-    assert isinstance(manager.guard("tokens"), AsyncTokenGuard)
-    assert isinstance(manager.token_service, AsyncTokenService)
-    assert isinstance(manager.password_grant(), AsyncPasswordGrant)
-    assert isinstance(manager.refresh_grant(), AsyncRefreshTokenGrant)
-    assert isinstance(manager.client_credentials_grant(), AsyncClientCredentialsGrant)
-    assert isinstance(manager.authorization_code_grant(), AsyncAuthorizationCodeGrant)
-    assert isinstance(manager.broker(), AsyncPasswordBroker)
+    assert isinstance(manager.guard("api").provider, ModelUserProvider)
+    assert isinstance(manager.guard("api"), PassportGuard)
+    assert isinstance(manager.guard("web"), SessionGuard)
+    assert isinstance(manager.guard("tokens"), TokenGuard)
+    assert isinstance(manager.token_service, TokenService)
+    assert isinstance(manager.password_grant(), PasswordGrant)
+    assert isinstance(manager.refresh_grant(), RefreshTokenGrant)
+    assert isinstance(manager.client_credentials_grant(), ClientCredentialsGrant)
+    assert isinstance(manager.authorization_code_grant(), AuthorizationCodeGrant)
+    assert isinstance(manager.broker(), PasswordBroker)
     assert manager.session_guard_name() == "web"
 
 
@@ -201,7 +200,7 @@ def test_removed_sql_stores_point_to_the_orm_store(section, removed):
 
 
 async def test_provider_reads_hashed_password_column_with_password_key():
-    provider = AsyncModelUserProvider(
+    provider = ModelUserProvider(
         AsyncUser, hasher=HASHER, password_field="hashed_password", password_key="password"
     )
     user = await provider.retrieve_by_credentials({"email": "ada@example.com"})
@@ -215,14 +214,14 @@ async def test_provider_reads_hashed_password_column_with_password_key():
 
 
 async def test_provider_is_active_accepts_attribute_or_callable():
-    by_attribute = AsyncModelUserProvider(AsyncUser, hasher=HASHER, is_active="is_active")
-    by_callable = AsyncModelUserProvider(AsyncUser, hasher=HASHER, is_active=lambda user: user.id == 2)
-    default = AsyncModelUserProvider(AsyncUser, hasher=HASHER)
+    by_attribute = ModelUserProvider(AsyncUser, hasher=HASHER, is_active="is_active")
+    by_callable = ModelUserProvider(AsyncUser, hasher=HASHER, is_active=lambda user: user.id == 2)
+    default = ModelUserProvider(AsyncUser, hasher=HASHER)
     active, inactive = AsyncUser.rows[1], AsyncUser.rows[2]
     async def by_coroutine_check(user):
         return user.id == 1
 
-    by_coroutine = AsyncModelUserProvider(AsyncUser, hasher=HASHER, is_active=by_coroutine_check)
+    by_coroutine = ModelUserProvider(AsyncUser, hasher=HASHER, is_active=by_coroutine_check)
     assert (await by_attribute.is_active(active), await by_attribute.is_active(inactive)) == (True, False)
     assert (await by_callable.is_active(active), await by_callable.is_active(inactive)) == (False, True)
     assert (await by_coroutine.is_active(active), await by_coroutine.is_active(inactive)) == (True, False)
@@ -230,7 +229,7 @@ async def test_provider_is_active_accepts_attribute_or_callable():
 
 
 async def test_provider_update_password_awaits_save():
-    provider = AsyncModelUserProvider(AsyncUser, hasher=HASHER, password_field="hashed_password")
+    provider = ModelUserProvider(AsyncUser, hasher=HASHER, password_field="hashed_password")
     user = AsyncUser.rows[1]
     await provider.update_password(user, "new-secret")
     assert AsyncUser.saves == [1]
@@ -352,7 +351,7 @@ async def test_personal_access_tokens(app):
     assert (await client.get("/oauth/personal-access-tokens", headers=headers)).json() == []
 
 
-# --- session guard + AsyncAuth facade --------------------------------------
+# --- session guard + Auth facade --------------------------------------
 
 
 @pytest.fixture
@@ -404,7 +403,7 @@ async def test_session_login_by_id_and_inactive_user(session_app, users):
 
 async def test_sync_facade_refuses_async_session_guard(session_app):
     client, _ = session_app
-    with pytest.raises(RuntimeError, match="use AsyncAuth"):
+    with pytest.raises(RuntimeError, match="use Auth"):
         await client.get("/sync-facade")
 
 

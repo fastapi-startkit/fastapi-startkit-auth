@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import secrets
-import threading
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -9,7 +8,7 @@ from typing import Any
 from ..concurrency import call
 from ..exceptions import InvalidTokenException
 from .models import ApiTokenRecord
-from .repository import ApiTokenRepository, generate_token_secret, hash_token_secret
+from .repository import generate_token_secret, hash_token_secret
 
 # Every verification failure raises this exact message so responses (and their
 # timing, via the dummy compare below) never reveal whether the id exists.
@@ -69,79 +68,6 @@ class NewApiToken:
 
 
 class ApiTokenManager:
-    """Issues, verifies, revokes, and lists opaque API tokens.
-
-    Exposed as ``AuthManager.api_tokens``; apps wire their own management
-    routes around it (the package ships none, per the app-owns-routes
-    decision).
-    """
-
-    def __init__(
-        self,
-        repository: ApiTokenRepository,
-        default_ttl: float | None = None,
-        purge_interval: float = 300,
-    ) -> None:
-        self.repository = repository
-        self._default_ttl = default_ttl
-        self._purge_interval = purge_interval
-        self._purge_lock = threading.Lock()
-        self._last_purge = time.time()
-
-    def _maybe_purge(self) -> None:
-        """Drop expired records periodically so stores stay bounded without a
-        scheduler (mirrors the purge-on-issue pattern of ``TokenService``)."""
-        now = time.time()
-        with self._purge_lock:
-            if now - self._last_purge < self._purge_interval:
-                return
-            self._last_purge = now
-        self.repository.purge_expired()
-
-    def create(
-        self,
-        user_id: Any,
-        name: str | None = None,
-        abilities: list[str] | None = None,
-        expires_at: float | None = None,
-    ) -> NewApiToken:
-        """Issue a token for ``user_id``; the plaintext is returned exactly once.
-
-        ``expires_at`` overrides the configured default ttl; ``None`` with no
-        configured ttl means the token never expires. ``abilities`` default to
-        the unrestricted ``["*"]``.
-        """
-        self._maybe_purge()
-        secret = generate_token_secret()
-        record = self.repository.create(
-            **_creation_fields(user_id, secret, name, abilities, expires_at, self._default_ttl)
-        )
-        return NewApiToken(record=record, plain_text=f"{record.id}|{secret}")
-
-    def verify(self, token: str) -> ApiTokenRecord:
-        """Resolve ``"{id}|{secret}"`` to its live record or raise 401.
-
-        Lookup is by id (O(1), no scan); the secret comparison is constant-time
-        against the stored hash — or against a dummy hash when the id is
-        unknown, so the miss path costs the same as a mismatch.
-        """
-        token_id, secret = _split_token(token)
-        record = self.repository.find(token_id) if token_id else None
-        _check_secret(record, secret)
-        self.repository.touch(record.id)
-        return record
-
-    def revoke(self, token_id: str) -> bool:
-        return self.repository.revoke(token_id)
-
-    def revoke_all(self, user_id: Any) -> int:
-        return self.repository.revoke_all_for_user(user_id)
-
-    def tokens_for(self, user_id: Any) -> list[ApiTokenRecord]:
-        return self.repository.list_for_user(user_id)
-
-
-class AsyncApiTokenManager:
     def __init__(self, repository: Any, default_ttl: float | None = None, purge_interval: float = 300) -> None:
         self.repository = repository
         self._default_ttl = default_ttl

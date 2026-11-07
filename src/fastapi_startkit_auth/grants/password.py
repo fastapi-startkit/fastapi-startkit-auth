@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from ..clients.models import Client
-from ..concurrency import call, ensure_sync
+from ..concurrency import call
 from ..exceptions import InvalidCredentialsException
 from ..policy import GrantPolicy
-from ..providers.base import UserProvider, user_is_active, user_is_active_async
-from ..tokens.service import IssuedToken, TokenService
+from ..providers.base import user_is_active
+from ..tokens.service import IssuedToken
 
 _INVALID_CREDENTIALS = "The provided credentials are incorrect."
 
@@ -23,46 +23,6 @@ def _check(policy: GrantPolicy, client: Client | None, scopes: list[str]) -> Non
 
 
 class PasswordGrant:
-    """Resource-owner password credentials grant (RFC 6749 §4.3).
-
-    A ``client`` that authenticated the request limits the grantable scopes to its allow-list.
-    """
-
-    def __init__(
-        self,
-        token_service: TokenService,
-        user_provider: UserProvider,
-        policy: GrantPolicy | None = None,
-        client: Client | None = None,
-    ) -> None:
-        self._tokens = token_service
-        self._users = user_provider
-        self._policy = policy or GrantPolicy()
-        self._client = client
-
-    def handle(self, *, username: str, password: str, scopes: list[str], client_id: str | None) -> IssuedToken:
-        _check(self._policy, self._client, scopes)
-        credentials = _credentials(username, password)
-        user = ensure_sync(self._users.retrieve_by_credentials(credentials), "retrieve_by_credentials")
-        if user is None:
-            # Perform equivalent hashing work so response timing doesn't reveal
-            # whether the account exists, then fail with the same generic error.
-            dummy = getattr(self._users, "dummy_verify", None)
-            if callable(dummy):
-                ensure_sync(dummy(), "dummy_verify")
-            raise InvalidCredentialsException(_INVALID_CREDENTIALS)
-        valid = ensure_sync(self._users.validate_credentials(user, credentials), "validate_credentials")
-        if not valid or not user_is_active(self._users, user):
-            raise InvalidCredentialsException(_INVALID_CREDENTIALS)
-        return self._tokens.issue(
-            user_id=self._users.get_identifier(user),
-            client_id=client_id,
-            scopes=scopes,
-            with_refresh=True,
-        )
-
-
-class AsyncPasswordGrant:
     def __init__(
         self,
         token_service: Any,
@@ -85,7 +45,7 @@ class AsyncPasswordGrant:
                 await call(dummy)
             raise InvalidCredentialsException(_INVALID_CREDENTIALS)
         valid = await call(self._users.validate_credentials, user, credentials)
-        if not valid or not await user_is_active_async(self._users, user):
+        if not valid or not await user_is_active(self._users, user):
             raise InvalidCredentialsException(_INVALID_CREDENTIALS)
         return await call(
             self._tokens.issue,

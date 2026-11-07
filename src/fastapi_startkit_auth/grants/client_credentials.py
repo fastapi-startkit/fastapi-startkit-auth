@@ -6,7 +6,7 @@ from ..clients.models import Client
 from ..concurrency import call
 from ..exceptions import UnauthorizedClientException
 from ..policy import GrantPolicy, ensure_client_may
-from ..tokens.service import IssuedToken, TokenService
+from ..tokens.service import IssuedToken
 
 
 def _check(policy: GrantPolicy, client: Client, scopes: list[str], resource: str | None) -> None:
@@ -20,24 +20,6 @@ def _check(policy: GrantPolicy, client: Client, scopes: list[str], resource: str
 
 
 class ClientCredentialsGrant:
-    """Machine-to-machine grant (RFC 6749 §4.4) for confidential clients. No user, no refresh token."""
-
-    def __init__(self, token_service: TokenService, policy: GrantPolicy | None = None) -> None:
-        self._tokens = token_service
-        self._policy = policy or GrantPolicy()
-
-    def handle(self, *, client: Client, scopes: list[str], resource: str | None = None) -> IssuedToken:
-        _check(self._policy, client, scopes, resource)
-        return self._tokens.issue(
-            user_id=None,
-            client_id=client.id,
-            scopes=scopes,
-            with_refresh=False,
-            audience=resource,
-        )
-
-
-class AsyncClientCredentialsGrant:
     def __init__(self, token_service: Any, policy: GrantPolicy | None = None) -> None:
         self._tokens = token_service
         self._policy = policy or GrantPolicy()

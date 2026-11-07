@@ -2,7 +2,7 @@ import pytest
 
 from fastapi_startkit_auth.exceptions import InvalidGrantException, InvalidTokenException
 from fastapi_startkit_auth.security.jwt import JWTEncoder
-from fastapi_startkit_auth.tokens.service import AsyncTokenService
+from fastapi_startkit_auth.tokens.service import TokenService
 
 SECRET = "async-refresh-race-secret-with-32-bytes!"
 
@@ -24,7 +24,7 @@ def _service(orm_database, *, before_consume=None, after_consume=None):
 
     repository = InterleavingRepository(orm_database)
     repository.hook = None
-    service = AsyncTokenService(encoder=JWTEncoder(secret=SECRET), repository=repository)
+    service = TokenService(encoder=JWTEncoder(secret=SECRET), repository=repository)
     return service, repository
 
 

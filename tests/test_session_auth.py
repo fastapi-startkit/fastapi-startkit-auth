@@ -57,19 +57,19 @@ def session_config(guards=None, default_guard="web"):
 
 def wire_routes(api):
     @api.post("/login")
-    def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
-        if not auth.attempt(payload):
+    async def login(payload: dict = Body(...), auth: Auth = Depends(Auth.scoped)):
+        if not await auth.attempt(payload):
             raise AuthenticationException("Invalid credentials.")
         return {"ok": True}
 
     @api.post("/login-as/{user_id}")
-    def login_as(user_id: int, auth: Auth = Depends(Auth.scoped)):
-        record = auth.login(user_id)
+    async def login_as(user_id: int, auth: Auth = Depends(Auth.scoped)):
+        record = await auth.login(user_id)
         return {"session_id": record.id}
 
     @api.post("/logout")
-    def logout(auth: Auth = Depends(Auth.scoped)):
-        auth.logout()
+    async def logout(auth: Auth = Depends(Auth.scoped)):
+        await auth.logout()
         return {"ok": True}
 
     @api.get("/me")
@@ -81,8 +81,8 @@ def wire_routes(api):
         return {"id": user["id"] if user else None}
 
     @api.get("/status")
-    def status(auth: Auth = Depends(Auth.scoped)):
-        return {"check": auth.check(), "id": auth.id()}
+    async def status(auth: Auth = Depends(Auth.scoped)):
+        return {"check": await auth.check(), "id": await auth.id()}
 
 
 def make_client(session=None, guards=None):
@@ -236,15 +236,15 @@ def test_session_driver_resolves_through_registry():
     assert guard.name == "web"
 
 
-def test_session_guard_resolves_user_from_session_id():
+async def test_session_guard_resolves_user_from_session_id():
     manager = _manager()
     guard = manager.guard("web")
     record = manager.session_store.create(user_id=1, guard="web", ttl=60)
-    context = guard.user_from_token(record.id)
+    context = await guard.user_from_token(record.id)
     assert context.user["id"] == 1
     assert context.scopes == ["*"]
     with pytest.raises(AuthenticationException):
-        guard.user_from_token("unknown-session-id")
+        await guard.user_from_token("unknown-session-id")
 
 
 def test_session_and_passport_guards_coexist():
@@ -299,51 +299,51 @@ def auth():
     return Auth(manager, make_request()), manager
 
 
-def test_facade_login_and_logout_manage_the_store(auth):
+async def test_facade_login_and_logout_manage_the_store(auth):
     facade, manager = auth
-    record = facade.login(1)
+    record = await facade.login(1)
     assert manager.session_store.find(record.id) is not None
-    assert facade.check() is True
-    assert facade.id() == 1
-    assert facade.user()["email"] == "ada@example.com"
+    assert await facade.check() is True
+    assert await facade.id() == 1
+    assert (await facade.user())["email"] == "ada@example.com"
 
-    facade.logout()
+    await facade.logout()
     assert manager.session_store.find(record.id) is None
-    assert facade.check() is False
-    assert facade.user() is None
+    assert await facade.check() is False
+    assert (await facade.user()) is None
 
 
-def test_facade_login_regenerates_session_id(auth):
+async def test_facade_login_regenerates_session_id(auth):
     facade, manager = auth
-    first = facade.login(1)
+    first = await facade.login(1)
     first_id = first.id
-    second = facade.login(1)
+    second = await facade.login(1)
     assert second.id != first_id
     assert manager.session_store.find(first_id) is None
     assert manager.session_store.find(second.id) is not None
 
 
-def test_facade_attempt_validates_credentials(auth):
+async def test_facade_attempt_validates_credentials(auth):
     facade, _ = auth
-    assert facade.attempt({"email": "ada@example.com", "password": "wrong"}) is False
-    assert facade.check() is False
-    assert facade.attempt({"email": "ada@example.com", "password": "secret"}) is True
-    assert facade.id() == 1
+    assert await facade.attempt({"email": "ada@example.com", "password": "wrong"}) is False
+    assert await facade.check() is False
+    assert await facade.attempt({"email": "ada@example.com", "password": "secret"}) is True
+    assert await facade.id() == 1
 
 
-def test_facade_login_rejects_unknown_user_id(auth):
+async def test_facade_login_rejects_unknown_user_id(auth):
     facade, _ = auth
     with pytest.raises(ValueError, match="No user with id 999"):
-        facade.login(999)
+        await facade.login(999)
 
 
-def test_facade_login_requires_a_session_guard():
+async def test_facade_login_requires_a_session_guard():
     manager = _manager(
         guards={"api": {"driver": "passport", "provider": "users"}}, default_guard="api"
     )
     facade = Auth(manager, make_request())
     with pytest.raises(RuntimeError, match="not a session guard"):
-        facade.login(1)
+        await facade.login(1)
 
 
 def test_secure_default_emits_no_warning():

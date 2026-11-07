@@ -5,7 +5,7 @@ from uuid import UUID
 import asyncpg
 import pytest
 
-from fastapi_startkit_auth.providers.model import AsyncModelUserProvider, ModelUserProvider
+from fastapi_startkit_auth.providers.model import ModelUserProvider
 
 POSTGRES_DSN = os.environ.get("TEST_ASYNCPG_DSN")
 
@@ -43,16 +43,16 @@ async def postgres_users():
 @pytest.mark.asyncio
 async def test_async_provider_coerces_numeric_subject_for_integer_key(postgres_users):
     _, integer_user, _ = postgres_users
-    user = await AsyncModelUserProvider(integer_user).retrieve_by_id("7")
+    user = await ModelUserProvider(integer_user).retrieve_by_id("7")
     assert user["id"] == 7
 
 
-def test_sync_provider_coerces_numeric_subject_for_integer_key(postgres_users):
+async def test_sync_provider_coerces_numeric_subject_for_integer_key(postgres_users):
     class SyncIntegerUser:
         id: int
 
         @classmethod
-        def find(cls, identifier):
+        async def find(cls, identifier):
             async def fetch():
                 connection = await asyncpg.connect(POSTGRES_DSN)
                 try:
@@ -60,9 +60,9 @@ def test_sync_provider_coerces_numeric_subject_for_integer_key(postgres_users):
                 finally:
                     await connection.close()
 
-            return asyncio.run(fetch())
+            return asyncio.run(await fetch())
 
-    user = ModelUserProvider(SyncIntegerUser()).retrieve_by_id("7")
+    user = await ModelUserProvider(SyncIntegerUser()).retrieve_by_id("7")
     assert user["id"] == 7
 
 
@@ -70,5 +70,5 @@ def test_sync_provider_coerces_numeric_subject_for_integer_key(postgres_users):
 async def test_async_provider_preserves_uuid_subject(postgres_users):
     _, _, uuid_user = postgres_users
     identifier = "d8ea1aa2-47e5-4fef-a3e8-dcd5fd68d217"
-    user = await AsyncModelUserProvider(uuid_user).retrieve_by_id(identifier)
+    user = await ModelUserProvider(uuid_user).retrieve_by_id(identifier)
     assert user["id"] == UUID(identifier)
