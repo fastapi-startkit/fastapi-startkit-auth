@@ -1,23 +1,17 @@
 # FastAPI Startkit Auth
 
-FastAPI Startkit Auth provides authentication for FastAPI: an OAuth2/JWT authorization server, cookie/session guards, SPA + CSRF protection, and API tokens.
+Authentication for FastAPI: cookie sessions with CSRF protection, opaque API tokens, and an OAuth 2.1 authorization server.
 
-## Official Documentation
+```sh
+uv add fastapi-startkit-auth
+```
 
-Documentation for FastAPI Startkit Auth can be found on the [FastAPI Startkit website](https://fastapi-startkit.github.io/docs/authentication).
+The documentation is on the [FastAPI Startkit website](https://fastapi-startkit.github.io/docs/authentication).
 
-## Contributing
+## Security vulnerabilities
 
-Thank you for considering contributing to FastAPI Startkit Auth! The contribution guide can be found in the [FastAPI Startkit documentation](https://fastapi-startkit.github.io/docs/authentication).
-
-## Code of Conduct
-
-In order to ensure that the FastAPI Startkit community is welcoming to all, please review and abide by the code of conduct in the [FastAPI Startkit documentation](https://fastapi-startkit.github.io/docs/authentication).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within FastAPI Startkit Auth, please report it privately to the maintainers rather than opening a public issue. Details can be found in the [FastAPI Startkit documentation](https://fastapi-startkit.github.io/docs/authentication).
+Report security vulnerabilities privately to the maintainers instead of opening a public issue.
 
 ## License
 
-FastAPI Startkit Auth is open-sourced software licensed under the [MIT license](LICENSE.md).
+MIT. See [LICENSE.md](LICENSE.md).
