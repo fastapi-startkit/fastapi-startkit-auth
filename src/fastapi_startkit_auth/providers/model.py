@@ -54,13 +54,13 @@ class ModelUserProvider:
         await asyncio.to_thread(self._hasher.verify, "invalid", self._dummy_hash)
 
     async def retrieve_by_id(self, identifier: Any) -> Any | None:
-        return await resolve(self._model.find(_identifier_for_model(self._model, identifier, self._id_field)))
+        return await call(self._model.find, _identifier_for_model(self._model, identifier, self._id_field))
 
     async def retrieve_by_credentials(self, credentials: dict[str, Any]) -> Any | None:
         username = credentials.get(self._username_field)
         if username is None:
             return None
-        return await resolve(self._model.where(self._username_field, username).first())
+        return await call(self._model.where(self._username_field, username).first)
 
     async def validate_credentials(self, user: Any, credentials: dict[str, Any]) -> bool:
         if user is None:
@@ -84,4 +84,4 @@ class ModelUserProvider:
         write_attribute(user, self._password_field, hashed)
         save = getattr(user, "save", None)
         if callable(save):
-            await resolve(save())
+            await call(save)

@@ -22,7 +22,10 @@ Each item lists what changed and what to do.
   `_async` suffix; `AuthManager.owner_provider` is now a coroutine.
   `AsyncMisconfiguration`, `ensure_sync`, `is_async_provider`,
   `guard_is_async`, `is_async` and `has_async_methods` are removed, and the
-  `"async_model"` provider driver is dropped in favour of `"model"`.
+  `"async_model"` provider driver is dropped in favour of `"model"`;
+  configuring it raises a `ValueError` naming the replacement. The `"model"`
+  driver accepts sync and async models: a sync model's `find`,
+  `where(...).first()` and `save()` run in the threadpool.
   `InMemoryUserProvider` methods are coroutines. User-supplied stores,
   listeners and `is_active` hooks may still be sync; they run in the
   threadpool. *Migrate:* import the plain names, `await` every `Auth`, guard,

@@ -426,3 +426,37 @@ def test_app_startup_keeps_the_apps_own_lifespan():
         assert provider._dummy_hash is not None
         assert events == ["start"]
     assert events == ["start", "stop"]
+
+
+class SyncAccount(Account):
+    @classmethod
+    def find(cls, identifier):
+        record_thread()
+        return Account.rows.get(identifier)
+
+    @classmethod
+    def where(cls, field, value):
+        class Query:
+            def first(self):
+                record_thread()
+                return next((u for u in Account.rows.values() if getattr(u, field) == value), None)
+
+        return Query()
+
+
+class SyncSavingUser(SimpleNamespace):
+    def save(self):
+        record_thread()
+
+
+async def test_sync_model_queries_and_save_never_run_on_the_loop():
+    provider = ModelUserProvider(SyncAccount, hasher=HASHER)
+    assert (await provider.retrieve_by_id(1)).email == "ada@example.com"
+    assert (await provider.retrieve_by_credentials({"email": "off@example.com"})).id == 2
+    await provider.update_password(SyncSavingUser(password=None), "changed")
+    assert LOOP_CALLS == [False, False, False]
+
+
+def test_async_model_driver_reports_its_replacement():
+    with pytest.raises(ValueError, match='"async_model" was removed: use driver "model"'):
+        install(FastAPI(), provider={"driver": "async_model", "model": Account})
