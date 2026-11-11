@@ -27,7 +27,12 @@ class CsrfMiddleware:
     ``X-XSRF-TOKEN``), or for HTML form posts the ``field`` (default ``_token``), matching the session's ``csrf_token``; the comparison is
     constant-time and failure is a 403 ``csrf_token_mismatch``. Requests
     without a session (bearer/token clients — no ambient credential) and safe
-    methods are exempt, as are configured exempt paths. When
+    methods are exempt, as are configured exempt paths. So are native token
+    clients: a request with an ``Authorization: Bearer`` token and no
+    ``Origin`` header, such as a mobile app whose HTTP stack replays the
+    session cookie. A page can only attach an ``Authorization`` header through
+    ``fetch``, which always sends ``Origin``, so a browser request still needs
+    the CSRF token, whatever its bearer. When
     ``stateful_origins`` is set, a foreign ``Origin`` header is rejected before
     the token is even checked (defense in depth).
 
@@ -72,7 +77,7 @@ class CsrfMiddleware:
 
         state = scope.setdefault("state", {})
         record = state.get(SESSION_KEY)
-        if scope["method"] in UNSAFE_METHODS and record is not None:
+        if scope["method"] in UNSAFE_METHODS and record is not None and not self._is_token_client(scope):
             receive, rejection = await self._reject(scope, receive, record)
             if rejection is not None:
                 await rejection(scope, receive, send)
@@ -103,6 +108,11 @@ class CsrfMiddleware:
         ):
             return receive, self._forbidden("CSRF token missing or invalid.")
         return receive, None
+
+    def _is_token_client(self, scope: Scope) -> bool:
+        scheme, _, token = (self._header_value(scope, b"authorization") or "").partition(" ")
+        is_bearer = scheme.lower() == "bearer" and bool(token.strip())
+        return is_bearer and self._header_value(scope, b"origin") is None
 
     def _is_form(self, scope: Scope) -> bool:
         content_type = self._header_value(scope, b"content-type") or ""

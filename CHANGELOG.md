@@ -233,6 +233,14 @@ using the ORM stores:
 
 ### Fixed
 
+- `CsrfMiddleware` no longer rejects native token clients that replay a
+  session cookie. An unsafe request with an `Authorization: Bearer` token and
+  no `Origin` header skips the session CSRF check, so a mobile app whose HTTP
+  stack keeps the session cookie no longer gets `csrf_token_mismatch`. The
+  bearer is not validated here: the guard decides authentication, and a
+  browser cannot send `Authorization` without `fetch`, which always sends
+  `Origin`. Browser requests, cookie-only requests and requests with an empty
+  or non-bearer `Authorization` header still need the CSRF token.
 - Refresh, authorization-code exchange and introspection re-check the token
   owner against the provider of the issuing client instead of always using the
   default guard's provider. The password grant authenticates against the
