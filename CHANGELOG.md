@@ -243,6 +243,10 @@ using the ORM stores:
   `Authorization` without `fetch`, which always sends `Origin`. Browser
   requests, cookie-only requests and requests with an empty or non-bearer
   `Authorization` header still need the CSRF token and keep session auth.
+  The token-client mark is set for every method, not only unsafe ones, and
+  browsers often omit `Origin` on same-origin `GET`s. So an SPA that sends a
+  stale bearer on such a `GET` loses the session fallback and gets 401;
+  drop the bearer to keep using the session.
 - Refresh, authorization-code exchange and introspection re-check the token
   owner against the provider of the issuing client instead of always using the
   default guard's provider. The password grant authenticates against the
