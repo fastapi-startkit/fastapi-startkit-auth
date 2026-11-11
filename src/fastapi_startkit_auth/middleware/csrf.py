@@ -10,7 +10,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..exceptions import CsrfTokenMismatchException
-from ..sessions.state import FORGET_KEY, SESSION_KEY
+from ..sessions.state import FORGET_KEY, SESSION_KEY, TOKEN_CLIENT_KEY
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
@@ -30,9 +30,11 @@ class CsrfMiddleware:
     methods are exempt, as are configured exempt paths. So are native token
     clients: a request with an ``Authorization: Bearer`` token and no
     ``Origin`` header, such as a mobile app whose HTTP stack replays the
-    session cookie. A page can only attach an ``Authorization`` header through
-    ``fetch``, which always sends ``Origin``, so a browser request still needs
-    the CSRF token, whatever its bearer. When
+    session cookie. Such a request is marked as a token client and is never
+    authenticated by the session: session guards refuse it, so only its
+    bearer can authenticate it. A page can only attach an ``Authorization``
+    header through ``fetch``, which always sends ``Origin``, so a browser
+    request still needs the CSRF token, whatever its bearer. When
     ``stateful_origins`` is set, a foreign ``Origin`` header is rejected before
     the token is even checked (defense in depth).
 
@@ -77,7 +79,8 @@ class CsrfMiddleware:
 
         state = scope.setdefault("state", {})
         record = state.get(SESSION_KEY)
-        if scope["method"] in UNSAFE_METHODS and record is not None and not self._is_token_client(scope):
+        state[TOKEN_CLIENT_KEY] = self._is_token_client(scope)
+        if scope["method"] in UNSAFE_METHODS and record is not None and not state[TOKEN_CLIENT_KEY]:
             receive, rejection = await self._reject(scope, receive, record)
             if rejection is not None:
                 await rejection(scope, receive, send)

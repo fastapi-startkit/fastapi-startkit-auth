@@ -285,10 +285,21 @@ def test_browser_requests_need_the_token_whatever_their_bearer():
         assert client.post("/mutate", headers={**headers, **csrf_headers(client)}).status_code == 200
 
 
-def test_a_garbage_bearer_from_a_native_client_skips_only_the_token_check():
+def test_a_garbage_bearer_from_a_native_client_never_uses_the_session():
     client = make_client(default_guard="api")
     logged_in_with_token(client)
-    assert client.post("/mutate", headers={"Authorization": "Bearer garbage"}).status_code == 200
+    garbage = {"Authorization": "Bearer garbage"}
+    assert client.post("/mutate", headers=garbage).status_code == 200
+    assert client.post("/tokens", headers=garbage).status_code == 401
+    assert client.get("/me", headers=garbage).status_code == 401
+
+
+def test_a_bearer_from_a_native_client_never_uses_the_session_guard():
+    client = make_client(default_guard="web")
+    token = logged_in_with_token(client)
+    assert client.get("/me").json()["id"] == 1
+    assert client.get("/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+    assert client.post("/tokens", headers={"Authorization": "Bearer garbage"}).status_code == 401
 
 
 def test_configurable_cookie_and_header_names():

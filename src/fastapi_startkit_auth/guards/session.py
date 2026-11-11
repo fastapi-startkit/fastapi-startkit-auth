@@ -8,7 +8,7 @@ from ..exceptions import AuthenticationException
 from ..concurrency import call, ensure_sync
 from ..providers.base import UserProvider, user_is_active, user_is_active_async
 from ..sessions.models import SessionRecord
-from ..sessions.state import FORGET_KEY, PENDING_KEY, SESSION_KEY
+from ..sessions.state import FORGET_KEY, PENDING_KEY, SESSION_KEY, TOKEN_CLIENT_KEY
 from ..sessions.store import SessionStore, new_session_record
 from .guard import AuthContext
 
@@ -39,7 +39,7 @@ class SessionGuard:
     def authenticate(self, request: Request) -> AuthContext:
         """Resolve the session attached to the request by the middleware."""
         record = getattr(request.state, SESSION_KEY, None)
-        if record is None:
+        if record is None or getattr(request.state, TOKEN_CLIENT_KEY, False):
             raise AuthenticationException("Not authenticated.")
         return self._context(record)
 
@@ -98,7 +98,7 @@ class AsyncSessionGuard:
 
     async def authenticate(self, request: Request) -> AuthContext:
         record = getattr(request.state, SESSION_KEY, None)
-        if record is None:
+        if record is None or getattr(request.state, TOKEN_CLIENT_KEY, False):
             raise AuthenticationException("Not authenticated.")
         return await self._context(record)
 
