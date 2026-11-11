@@ -250,6 +250,47 @@ def test_exempt_paths_skip_the_token_check():
     assert client.post("/mutate").status_code == 403
 
 
+def logged_in_with_token(client):
+    client.get("/__auth__/csrf-cookie")
+    client.post(
+        "/login",
+        json={"email": "ada@example.com", "password": "secret"},
+        headers=csrf_headers(client),
+    )
+    return client.post("/tokens", headers=csrf_headers(client)).json()["token"]
+
+
+def test_bearer_requests_replaying_the_session_cookie_skip_the_token_check():
+    client = make_client(default_guard="api")
+    token = logged_in_with_token(client)
+    bearer = {"Authorization": f"Bearer {token}"}
+    assert client.post("/mutate", headers=bearer).status_code == 200
+    assert client.post("/tokens", headers=bearer).status_code == 200
+
+
+def test_session_requests_without_a_bearer_still_need_the_token():
+    client = make_client(default_guard="api")
+    logged_in_with_token(client)
+    assert client.post("/mutate").status_code == 403
+    assert client.post("/mutate", headers={"Authorization": "Basic YWRhOnNlY3JldA=="}).status_code == 403
+    assert client.post("/mutate", headers={"Authorization": "Bearer "}).status_code == 403
+
+
+def test_browser_requests_need_the_token_whatever_their_bearer():
+    client = make_client(default_guard="api")
+    token = logged_in_with_token(client)
+    for bearer in (token, "garbage"):
+        headers = {"Authorization": f"Bearer {bearer}", "Origin": SPA_ORIGIN}
+        assert client.post("/mutate", headers=headers).status_code == 403
+        assert client.post("/mutate", headers={**headers, **csrf_headers(client)}).status_code == 200
+
+
+def test_a_garbage_bearer_from_a_native_client_skips_only_the_token_check():
+    client = make_client(default_guard="api")
+    logged_in_with_token(client)
+    assert client.post("/mutate", headers={"Authorization": "Bearer garbage"}).status_code == 200
+
+
 def test_configurable_cookie_and_header_names():
     client = make_client(session={"csrf_cookie": "MY-CSRF", "csrf_header": "X-MY-CSRF"})
     client.get("/__auth__/csrf-cookie")
