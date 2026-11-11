@@ -8,7 +8,7 @@ from ..exceptions import AuthenticationException
 from ..concurrency import call
 from ..providers.base import user_is_active
 from ..sessions.models import SessionRecord
-from ..sessions.state import FORGET_KEY, PENDING_KEY, SESSION_KEY
+from ..sessions.state import FORGET_KEY, PENDING_KEY, SESSION_KEY, TOKEN_CLIENT_KEY
 from ..sessions.store import new_session_record
 from .guard import AuthContext
 
@@ -28,7 +28,7 @@ class SessionGuard:
 
     async def authenticate(self, request: Request) -> AuthContext:
         record = getattr(request.state, SESSION_KEY, None)
-        if record is None:
+        if record is None or getattr(request.state, TOKEN_CLIENT_KEY, False):
             raise AuthenticationException("Not authenticated.")
         return await self._context(record)
 
